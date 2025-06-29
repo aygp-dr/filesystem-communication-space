@@ -1,0 +1,45 @@
+#+TITLE: Change Requests
+#+AUTHOR: aygp-dr
+#+OPTIONS: toc:t num:nil
+
+* Overview
+
+This directory tracks feature requests, improvements, and proposed changes to the filesystem-communication-space project.
+
+* Format
+
+Each change request should be documented as a separate org file with the naming convention:
+~YYYY-MM-DD-brief-description.org~
+
+* Template
+
+#+begin_src org
+#+TITLE: [Title of Change Request]
+#+AUTHOR: [Your Name]
+#+DATE: YYYY-MM-DD
+#+PROPERTY: Status [Proposed|In Progress|Completed|Rejected]
+
+* Summary
+Brief description of the proposed change.
+
+* Motivation
+Why is this change needed?
+
+* Detailed Description
+Full details of the proposed change.
+
+* Implementation Notes
+Any technical considerations or implementation details.
+
+* Testing Plan
+How will this change be tested?
+
+* Code Examples
+#+begin_src python
+# Example code if applicable
+#+end_src
+#+end_src
+
+* Current Requests
+
+(None yet - this directory will track future change requests)

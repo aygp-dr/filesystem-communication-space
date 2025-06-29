@@ -1,0 +1,82 @@
+#+TITLE: Experiments
+#+AUTHOR: aygp-dr
+#+OPTIONS: toc:t num:nil
+
+* Overview
+
+This directory contains experimental code and test results for filesystem-based IPC mechanisms. All experiments should be documented with their test platforms and results.
+
+* Test Platforms
+
+Our experiments are conducted across multiple platforms to ensure portability and understand platform-specific behaviors:
+
+** Primary Development Platform (Raspberry Pi)
+#+begin_src
+Linux pi 6.12.20+rpt-rpi-v8 #1 SMP PREEMPT Debian 1:6.12.20-1+rpt1~bpo12+1 (2025-03-19) aarch64 GNU/Linux
+#+end_src
+
+** Additional Test Platforms
+
+*** FreeBSD (nexushive)
+#+begin_src
+FreeBSD nexushive 14.3-RELEASE FreeBSD 14.3-RELEASE releng/14.3-n271432-8c9ce319fef7 GENERIC amd64
+#+end_src
+
+*** macOS (Apple Silicon)
+#+begin_src
+Darwin Jasons-MacBook-Pro.local 24.1.0 Darwin Kernel Version 24.1.0: Thu Oct 10 21:03:15 PDT 2024; root:xnu-11215.41.3~2/RELEASE_ARM64_T6000 arm64
+#+end_src
+
+* Experiment Structure
+
+Each experiment should be organized as follows:
+
+#+begin_src
+experiments/
+├── YYYY-MM-DD-experiment-name/
+│   ├── README.org           # Experiment description and results
+│   ├── code/               # Source code
+│   ├── data/               # Test data and results
+│   └── plots/              # Visualizations
+#+end_src
+
+* Running Experiments
+
+To run all experiments:
+#+begin_src bash
+make experiments
+#+end_src
+
+To run benchmarks:
+#+begin_src bash
+make benchmark
+#+end_src
+
+* Platform-Specific Notes
+
+** Linux
+- Full POSIX compliance
+- inotify available for file system events
+- /proc and /sys filesystems provide additional IPC mechanisms
+
+** FreeBSD
+- kqueue for file system events
+- Different /proc implementation
+- Jails may affect filesystem namespace visibility
+
+** macOS
+- FSEvents API for file system monitoring
+- Different semaphore implementation
+- SIP (System Integrity Protection) may affect some operations
+
+* Experiment Guidelines
+
+1. Always document the test platform(s) used
+2. Include timing information and resource usage
+3. Test with multiple file systems when relevant
+4. Consider security implications (permissions, race conditions)
+5. Document any platform-specific behavior observed
+
+* Current Experiments
+
+(None yet - experiments will be extracted from the org files using ~make tangle~)

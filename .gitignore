@@ -19,8 +19,9 @@ __pycache__/
 *.bbl
 *.blg
 
-# Generated directories
-experiments/
+# Generated directories (but keep README files)
+experiments/*
+!experiments/README.org
 patterns/
 analysis/
 security/
