@@ -1,22 +1,26 @@
 # Makefile for Filesystem Communication Space
 # Handles tangling org files, running experiments, and generating diagrams
 
-.PHONY: all tangle experiments benchmark diagrams clean help pdf
+.PHONY: all tangle experiments benchmark diagrams clean help pdf readme
 
 # Default target
-all: tangle diagrams
+all: README.md tangle diagrams
 
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  all         - Tangle code and generate diagrams (default)"
+	@echo "  all         - Generate README.md, tangle code and generate diagrams (default)"
 	@echo "  tangle      - Extract source code from org files"
 	@echo "  experiments - Run all experiments"
 	@echo "  benchmark   - Run performance benchmarks"
 	@echo "  diagrams    - Generate Mermaid diagrams"
 	@echo "  pdf         - Generate PDF documentation"
+	@echo "  readme      - Generate README.md from README.org"
 	@echo "  clean       - Remove generated files"
 	@echo "  help        - Show this help message"
+
+# Convenience target for README
+readme: README.md
 
 # Generate PDF documentation
 filesystem-communication-space.pdf: filesystem-communication-space.org
@@ -30,6 +34,17 @@ filesystem-communication-space.pdf: filesystem-communication-space.org
 
 # Convenience target for PDF
 pdf: filesystem-communication-space.pdf
+
+# Generate README.md from README.org for uv/pip compatibility
+README.md: README.org
+	@echo "Generating README.md from README.org..."
+	@emacs --batch \
+		--eval "(require 'org)" \
+		--eval "(require 'ox-md)" \
+		--visit="$<" \
+		--eval "(org-md-export-to-markdown)" \
+		--kill
+	@echo "README.md generation complete!"
 
 # Tangle all org files to extract source code
 tangle:
