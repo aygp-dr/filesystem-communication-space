@@ -1,0 +1,1038 @@
+#+TITLE: Performance Analysis of Filesystem IPC
+#+AUTHOR: AYGP-DR
+#+DATE: 2025-06-28
+#+OPTIONS: toc:2 num:t
+
+* Benchmarks and Measurements
+
+** Overview
+
+This chapter provides comprehensive performance analysis of filesystem-based IPC mechanisms, including benchmarks, profiling, and optimization strategies.
+
+** Methodology
+
+*** Test Environment
+
+#+begin_src python :tangle benchmarks/test_environment.py :mkdirp yes
+"""
+Document and verify test environment for benchmarks.
+"""
+
+import os
+import platform
+import subprocess
+import psutil
+from pathlib import Path
+
+class TestEnvironment:
+    """Capture test environment details"""
+    
+    def get_system_info(self) -> dict:
+        """Get system information"""
+        return {
+            'platform': platform.platform(),
+            'processor': platform.processor(),
+            'cpu_count': os.cpu_count(),
+            'memory_gb': psutil.virtual_memory().total / (1024**3),
+            'kernel': platform.release(),
+            'python': platform.python_version()
+        }
+    
+    def get_filesystem_info(self, path: str = "/tmp") -> dict:
+        """Get filesystem information"""
+        stat = os.statvfs(path)
+        
+        # Try to determine filesystem type
+        try:
+            df_output = subprocess.check_output(
+                ['df', '-T', path], 
+                text=True
+            ).strip().split('\n')[1]
+            fs_type = df_output.split()[1]
+        except:
+            fs_type = "unknown"
+        
+        return {
+            'type': fs_type,
+            'block_size': stat.f_bsize,
+            'total_blocks': stat.f_blocks,
+            'free_blocks': stat.f_bavail,
+            'total_inodes': stat.f_files,
+            'free_inodes': stat.f_favail
+        }
+    
+    def get_limits(self) -> dict:
+        """Get system limits relevant to IPC"""
+        import resource
+        
+        return {
+            'open_files': resource.getrlimit(resource.RLIMIT_NOFILE),
+            'pipe_buf': os.pathconf('/', os.pathconf_names['PC_PIPE_BUF']),
+            'path_max': os.pathconf('/', os.pathconf_names['PC_PATH_MAX']),
+            'name_max': os.pathconf('/', os.pathconf_names['PC_NAME_MAX'])
+        }
+    
+    def print_environment(self):
+        """Print test environment details"""
+        print("=== Test Environment ===")
+        
+        print("\nSystem:")
+        for key, value in self.get_system_info().items():
+            print(f"  {key}: {value}")
+        
+        print("\nFilesystem (/tmp):")
+        for key, value in self.get_filesystem_info().items():
+            print(f"  {key}: {value}")
+        
+        print("\nLimits:")
+        for key, value in self.get_limits().items():
+            print(f"  {key}: {value}")
+
+# TODO: Add more environment checks
+# - [ ] Mount options (noatime, etc)
+# - [ ] I/O scheduler
+# - [ ] Kernel parameters
+# - [ ] Network filesystem detection
+#+end_src
+
+*** Benchmark Framework
+
+#+begin_src python :tangle benchmarks/benchmark_framework.py :mkdirp yes
+"""
+Framework for consistent benchmarking of IPC methods.
+"""
+
+import time
+import statistics
+import gc
+import json
+from typing import Callable, List, Dict, Any
+from dataclasses import dataclass
+from pathlib import Path
+
+@dataclass
+class BenchmarkResult:
+    """Result of a benchmark run"""
+    name: str
+    iterations: int
+    total_time: float
+    times: List[float]
+    
+    @property
+    def mean(self) -> float:
+        return statistics.mean(self.times)
+    
+    @property
+    def median(self) -> float:
+        return statistics.median(self.times)
+    
+    @property
+    def stdev(self) -> float:
+        return statistics.stdev(self.times) if len(self.times) > 1 else 0
+    
+    @property
+    def percentiles(self) -> Dict[int, float]:
+        if len(self.times) < 2:
+            return {}
+        quantiles = statistics.quantiles(self.times, n=100)
+        return {
+            50: self.median,
+            90: quantiles[89],
+            95: quantiles[94],
+            99: quantiles[98]
+        }
+    
+    @property
+    def throughput(self) -> float:
+        return self.iterations / self.total_time
+
+class Benchmark:
+    """Benchmark runner with warmup and statistics"""
+    
+    def __init__(self, name: str):
+        self.name = name
+        self.results = []
+        
+    def run(self, 
+            func: Callable,
+            iterations: int = 10000,
+            warmup: int = 100,
+            args: tuple = (),
+            kwargs: dict = None) -> BenchmarkResult:
+        """Run benchmark with warmup"""
+        
+        if kwargs is None:
+            kwargs = {}
+        
+        # Warmup
+        print(f"Warming up {self.name}...")
+        for _ in range(warmup):
+            func(*args, **kwargs)
+        
+        # Force garbage collection
+        gc.collect()
+        gc.disable()
+        
+        # Benchmark
+        print(f"Running {self.name} ({iterations} iterations)...")
+        times = []
+        
+        total_start = time.perf_counter()
+        
+        for _ in range(iterations):
+            start = time.perf_counter()
+            func(*args, **kwargs)
+            end = time.perf_counter()
+            times.append(end - start)
+        
+        total_end = time.perf_counter()
+        
+        # Re-enable GC
+        gc.enable()
+        
+        result = BenchmarkResult(
+            name=self.name,
+            iterations=iterations,
+            total_time=total_end - total_start,
+            times=times
+        )
+        
+        self.results.append(result)
+        return result
+    
+    def compare(self, other: 'Benchmark') -> dict:
+        """Compare with another benchmark"""
+        if not self.results or not other.results:
+            return {}
+        
+        self_result = self.results[-1]
+        other_result = other.results[-1]
+        
+        return {
+            'speedup': other_result.mean / self_result.mean,
+            'throughput_ratio': self_result.throughput / other_result.throughput
+        }
+    
+    def save_results(self, path: Path):
+        """Save results to JSON"""
+        data = []
+        for result in self.results:
+            data.append({
+                'name': result.name,
+                'iterations': result.iterations,
+                'total_time': result.total_time,
+                'mean': result.mean,
+                'median': result.median,
+                'stdev': result.stdev,
+                'percentiles': result.percentiles,
+                'throughput': result.throughput
+            })
+        
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
+#+end_src
+
+** Core Operation Benchmarks
+
+*** File Operations
+
+#+begin_src python :tangle benchmarks/file_operations.py :mkdirp yes :shebang #!/usr/bin/env python3
+"""
+Benchmark basic file operations used in IPC.
+"""
+
+import os
+import tempfile
+from pathlib import Path
+from benchmark_framework import Benchmark
+
+class FileOperationBenchmarks:
+    """Benchmark file operations"""
+    
+    def __init__(self):
+        self.test_dir = Path(tempfile.mkdtemp())
+        self.test_data = b'x' * 1024  # 1KB
+        
+    def benchmark_create_delete(self):
+        """Benchmark file creation and deletion"""
+        counter = 0
+        
+        def create_delete():
+            nonlocal counter
+            path = self.test_dir / f"test_{counter}.tmp"
+            counter += 1
+            
+            # Create
+            path.write_bytes(self.test_data)
+            
+            # Delete
+            path.unlink()
+        
+        bench = Benchmark("create_delete")
+        return bench.run(create_delete)
+    
+    def benchmark_atomic_rename(self):
+        """Benchmark atomic rename pattern"""
+        source = self.test_dir / "source.tmp"
+        dest = self.test_dir / "dest.tmp"
+        
+        def atomic_rename():
+            # Write to temp
+            source.write_bytes(self.test_data)
+            
+            # Atomic rename
+            os.rename(source, dest)
+            
+            # Rename back for next iteration
+            os.rename(dest, source)
+        
+        # Setup
+        source.write_bytes(self.test_data)
+        
+        bench = Benchmark("atomic_rename")
+        result = bench.run(atomic_rename)
+        
+        # Cleanup
+        try:
+            source.unlink()
+        except:
+            dest.unlink()
+        
+        return result
+    
+    def benchmark_lock_unlock(self):
+        """Benchmark file locking"""
+        import fcntl
+        
+        lock_file = self.test_dir / "lock.file"
+        lock_file.touch()
+        
+        def lock_unlock():
+            with open(lock_file, 'r') as f:
+                # Acquire exclusive lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                
+                # Release lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        
+        bench = Benchmark("lock_unlock")
+        return bench.run(lock_unlock)
+    
+    def benchmark_directory_list(self):
+        """Benchmark directory listing"""
+        # Create many files
+        for i in range(1000):
+            (self.test_dir / f"file_{i}.tmp").touch()
+        
+        def list_dir():
+            list(self.test_dir.iterdir())
+        
+        bench = Benchmark("directory_list_1000")
+        return bench.run(list_dir, iterations=1000)
+    
+    def run_all(self):
+        """Run all file operation benchmarks"""
+        print("\n=== File Operation Benchmarks ===")
+        
+        results = {
+            'create_delete': self.benchmark_create_delete(),
+            'atomic_rename': self.benchmark_atomic_rename(),
+            'lock_unlock': self.benchmark_lock_unlock(),
+            'directory_list': self.benchmark_directory_list()
+        }
+        
+        # Print results
+        for name, result in results.items():
+            print(f"\n{name}:")
+            print(f"  Mean: {result.mean*1000:.3f} ms")
+            print(f"  Throughput: {result.throughput:.0f} ops/sec")
+            print(f"  P99: {result.percentiles.get(99, 0)*1000:.3f} ms")
+        
+        return results
+
+if __name__ == "__main__":
+    bench = FileOperationBenchmarks()
+    bench.run_all()
+#+end_src
+
+*** IPC Primitive Comparison
+
+#+begin_src python :tangle benchmarks/ipc_comparison.py :mkdirp yes :shebang #!/usr/bin/env python3
+"""
+Compare performance of different IPC primitives.
+"""
+
+import os
+import socket
+import tempfile
+import mmap
+from pathlib import Path
+from benchmark_framework import Benchmark
+
+class IPCComparison:
+    """Compare IPC primitive performance"""
+    
+    def __init__(self, message_size=1024):
+        self.message_size = message_size
+        self.message = b'x' * message_size
+        self.temp_dir = Path(tempfile.mkdtemp())
+        
+    def benchmark_pipe(self):
+        """Benchmark pipe communication"""
+        read_fd, write_fd = os.pipe()
+        
+        # Set non-blocking
+        os.set_blocking(read_fd, False)
+        
+        def pipe_transfer():
+            os.write(write_fd, self.message)
+            try:
+                os.read(read_fd, self.message_size)
+            except BlockingIOError:
+                pass
+        
+        bench = Benchmark(f"pipe_{self.message_size}B")
+        result = bench.run(pipe_transfer)
+        
+        os.close(read_fd)
+        os.close(write_fd)
+        
+        return result
+    
+    def benchmark_unix_socket(self):
+        """Benchmark Unix domain socket"""
+        sock_path = self.temp_dir / "bench.sock"
+        
+        # Create socket pair
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        server.bind(str(sock_path))
+        
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        
+        def socket_transfer():
+            client.sendto(self.message, str(sock_path))
+            server.recvfrom(self.message_size)
+        
+        bench = Benchmark(f"unix_socket_{self.message_size}B")
+        result = bench.run(socket_transfer)
+        
+        server.close()
+        client.close()
+        sock_path.unlink()
+        
+        return result
+    
+    def benchmark_shared_memory(self):
+        """Benchmark shared memory"""
+        shm_file = self.temp_dir / "shared.mem"
+        shm_size = max(4096, self.message_size * 2)
+        
+        # Create and map file
+        with open(shm_file, 'wb') as f:
+            f.write(b'\0' * shm_size)
+        
+        fd = os.open(shm_file, os.O_RDWR)
+        shm = mmap.mmap(fd, shm_size)
+        
+        def shm_transfer():
+            # Write
+            shm[0:self.message_size] = self.message
+            
+            # Read
+            _ = shm[0:self.message_size]
+        
+        bench = Benchmark(f"shared_memory_{self.message_size}B")
+        result = bench.run(shm_transfer)
+        
+        shm.close()
+        os.close(fd)
+        shm_file.unlink()
+        
+        return result
+    
+    def benchmark_file_based(self):
+        """Benchmark file-based communication"""
+        msg_file = self.temp_dir / "message.dat"
+        
+        def file_transfer():
+            # Write
+            msg_file.write_bytes(self.message)
+            
+            # Read
+            _ = msg_file.read_bytes()
+        
+        bench = Benchmark(f"file_based_{self.message_size}B")
+        return bench.run(file_transfer)
+    
+    def run_comparison(self):
+        """Run all comparisons"""
+        print(f"\n=== IPC Performance Comparison ({self.message_size} bytes) ===")
+        
+        results = {
+            'pipe': self.benchmark_pipe(),
+            'unix_socket': self.benchmark_unix_socket(),
+            'shared_memory': self.benchmark_shared_memory(),
+            'file_based': self.benchmark_file_based()
+        }
+        
+        # Sort by throughput
+        sorted_results = sorted(
+            results.items(),
+            key=lambda x: x[1].throughput,
+            reverse=True
+        )
+        
+        print("\nResults (sorted by throughput):")
+        print(f"{'Method':<15} {'Throughput':<15} {'Latency (μs)':<15} {'Bandwidth (MB/s)':<15}")
+        print("-" * 60)
+        
+        for method, result in sorted_results:
+            bandwidth = (result.throughput * self.message_size) / (1024 * 1024)
+            print(f"{method:<15} {result.throughput:<15.0f} {result.mean*1e6:<15.1f} {bandwidth:<15.1f}")
+        
+        return results
+
+if __name__ == "__main__":
+    # Test different message sizes
+    for size in [64, 1024, 4096, 65536]:
+        comparison = IPCComparison(message_size=size)
+        comparison.run_comparison()
+#+end_src
+
+** Scalability Analysis
+
+*** Concurrent Access Patterns
+
+#+begin_src python :tangle benchmarks/scalability_test.py :mkdirp yes :shebang #!/usr/bin/env python3
+"""
+Test scalability with multiple processes.
+"""
+
+import os
+import time
+import multiprocessing
+import tempfile
+from pathlib import Path
+from typing import Callable
+
+class ScalabilityTest:
+    """Test IPC scalability with varying process counts"""
+    
+    def __init__(self):
+        self.test_dir = Path(tempfile.mkdtemp())
+        
+    def test_queue_scalability(self):
+        """Test queue implementation scalability"""
+        
+        def producer(queue_dir: Path, producer_id: int, count: int):
+            """Producer process"""
+            for i in range(count):
+                msg_file = queue_dir / f"msg_{producer_id}_{i}.queue"
+                msg_file.write_text(f"Message from {producer_id}")
+        
+        def consumer(queue_dir: Path, consumer_id: int):
+            """Consumer process"""
+            consumed = 0
+            while True:
+                messages = sorted(queue_dir.glob("*.queue"))
+                if not messages:
+                    if consumed > 0:
+                        break
+                    time.sleep(0.01)
+                    continue
+                
+                for msg in messages:
+                    try:
+                        # Try to claim message
+                        claimed = msg.with_suffix('.claimed')
+                        os.rename(msg, claimed)
+                        
+                        # Process
+                        _ = claimed.read_text()
+                        claimed.unlink()
+                        consumed += 1
+                    except OSError:
+                        pass
+            
+            return consumed
+        
+        print("\n=== Queue Scalability Test ===")
+        print(f"{'Producers':<12} {'Consumers':<12} {'Messages':<12} {'Time (s)':<12} {'Throughput':<12}")
+        print("-" * 60)
+        
+        for num_producers in [1, 2, 4, 8]:
+            for num_consumers in [1, 2, 4, 8]:
+                # Setup
+                queue_dir = self.test_dir / f"queue_{num_producers}_{num_consumers}"
+                queue_dir.mkdir()
+                
+                messages_per_producer = 1000
+                total_messages = num_producers * messages_per_producer
+                
+                start = time.time()
+                
+                # Start consumers
+                consumers = []
+                for i in range(num_consumers):
+                    p = multiprocessing.Process(
+                        target=consumer,
+                        args=(queue_dir, i)
+                    )
+                    p.start()
+                    consumers.append(p)
+                
+                # Start producers
+                producers = []
+                for i in range(num_producers):
+                    p = multiprocessing.Process(
+                        target=producer,
+                        args=(queue_dir, i, messages_per_producer)
+                    )
+                    p.start()
+                    producers.append(p)
+                
+                # Wait for completion
+                for p in producers:
+                    p.join()
+                
+                for p in consumers:
+                    p.join()
+                
+                elapsed = time.time() - start
+                throughput = total_messages / elapsed
+                
+                print(f"{num_producers:<12} {num_consumers:<12} {total_messages:<12} "
+                      f"{elapsed:<12.2f} {throughput:<12.0f}")
+    
+    def test_lock_contention(self):
+        """Test lock contention with multiple processes"""
+        
+        def lock_worker(lock_file: Path, worker_id: int, iterations: int):
+            """Worker that acquires/releases lock"""
+            import fcntl
+            
+            acquired = 0
+            for _ in range(iterations):
+                with open(lock_file, 'r') as f:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    acquired += 1
+                    # Simulate work
+                    time.sleep(0.0001)
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            
+            return acquired
+        
+        print("\n=== Lock Contention Test ===")
+        print(f"{'Workers':<12} {'Iterations':<12} {'Time (s)':<12} {'Locks/sec':<12}")
+        print("-" * 48)
+        
+        lock_file = self.test_dir / "contention.lock"
+        lock_file.touch()
+        
+        for num_workers in [1, 2, 4, 8, 16]:
+            iterations_per_worker = 100
+            
+            start = time.time()
+            
+            workers = []
+            for i in range(num_workers):
+                p = multiprocessing.Process(
+                    target=lock_worker,
+                    args=(lock_file, i, iterations_per_worker)
+                )
+                p.start()
+                workers.append(p)
+            
+            for p in workers:
+                p.join()
+            
+            elapsed = time.time() - start
+            total_locks = num_workers * iterations_per_worker
+            rate = total_locks / elapsed
+            
+            print(f"{num_workers:<12} {iterations_per_worker:<12} "
+                  f"{elapsed:<12.2f} {rate:<12.0f}")
+
+# TODO: Add more scalability tests
+# - [ ] Directory entry limits
+# - [ ] File descriptor exhaustion
+# - [ ] Inotify watch limits
+# - [ ] Shared memory limits
+
+if __name__ == "__main__":
+    test = ScalabilityTest()
+    test.test_queue_scalability()
+    test.test_lock_contention()
+#+end_src
+
+** Filesystem-Specific Performance
+
+*** Different Filesystem Comparison
+
+#+begin_src python :tangle benchmarks/filesystem_comparison.py :mkdirp yes :shebang #!/usr/bin/env python3
+"""
+Compare IPC performance across different filesystems.
+"""
+
+import os
+import tempfile
+import subprocess
+from pathlib import Path
+
+class FilesystemComparison:
+    """Compare IPC on different filesystems"""
+    
+    def __init__(self):
+        self.filesystems = self._detect_filesystems()
+        
+    def _detect_filesystems(self) -> dict:
+        """Detect available filesystems"""
+        fs = {}
+        
+        # Common locations and their typical filesystems
+        test_paths = {
+            '/tmp': 'tmpfs (maybe)',
+            '/var/tmp': 'persistent',
+            '/dev/shm': 'tmpfs',
+            os.path.expanduser('~'): 'home'
+        }
+        
+        for path, desc in test_paths.items():
+            if os.path.exists(path) and os.access(path, os.W_OK):
+                fs[desc] = path
+        
+        return fs
+    
+    def benchmark_atomic_operations(self, fs_path: Path) -> dict:
+        """Benchmark atomic operations on filesystem"""
+        import time
+        
+        test_dir = fs_path / f"ipc_bench_{os.getpid()}"
+        test_dir.mkdir(exist_ok=True)
+        
+        results = {}
+        iterations = 1000
+        
+        # Benchmark atomic rename
+        start = time.time()
+        for i in range(iterations):
+            src = test_dir / f"src_{i}"
+            dst = test_dir / f"dst_{i}"
+            src.touch()
+            os.rename(src, dst)
+            dst.unlink()
+        results['atomic_rename'] = iterations / (time.time() - start)
+        
+        # Benchmark directory creation
+        start = time.time()
+        for i in range(iterations):
+            d = test_dir / f"dir_{i}"
+            d.mkdir()
+            d.rmdir()
+        results['mkdir_rmdir'] = iterations / (time.time() - start)
+        
+        # Cleanup
+        test_dir.rmdir()
+        
+        return results
+    
+    def run_comparison(self):
+        """Compare across all detected filesystems"""
+        print("\n=== Filesystem Performance Comparison ===")
+        
+        for name, path in self.filesystems.items():
+            print(f"\nTesting {name} ({path}):")
+            
+            try:
+                results = self.benchmark_atomic_operations(Path(path))
+                
+                for op, rate in results.items():
+                    print(f"  {op}: {rate:.0f} ops/sec")
+                    
+            except Exception as e:
+                print(f"  Error: {e}")
+
+# TODO: Add more filesystem-specific tests
+# - [ ] Extended attribute performance
+# - [ ] Hard link performance
+# - [ ] Sparse file handling
+# - [ ] Direct I/O support
+
+if __name__ == "__main__":
+    comparison = FilesystemComparison()
+    comparison.run_comparison()
+#+end_src
+
+** Profiling and Optimization
+
+*** CPU and I/O Profiling
+
+#+begin_src python :tangle benchmarks/profile_ipc.py :mkdirp yes :shebang #!/usr/bin/env python3
+"""
+Profile CPU and I/O usage of IPC operations.
+"""
+
+import os
+import time
+import cProfile
+import pstats
+import io
+from pathlib import Path
+
+class IPCProfiler:
+    """Profile IPC operations"""
+    
+    def profile_file_queue(self):
+        """Profile file-based queue operations"""
+        
+        def file_queue_operations():
+            queue_dir = Path("/tmp/profile_queue")
+            queue_dir.mkdir(exist_ok=True)
+            
+            # Simulate queue operations
+            for i in range(1000):
+                # Enqueue
+                msg_file = queue_dir / f"msg_{i}.queue"
+                msg_file.write_bytes(b"x" * 1024)
+                
+                # Dequeue
+                msg_file.unlink()
+            
+            queue_dir.rmdir()
+        
+        # CPU profiling
+        pr = cProfile.Profile()
+        pr.enable()
+        
+        file_queue_operations()
+        
+        pr.disable()
+        
+        # Print stats
+        s = io.StringIO()
+        ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+        ps.print_stats(10)  # Top 10 functions
+        
+        print("\n=== CPU Profile: File Queue ===")
+        print(s.getvalue())
+    
+    def measure_syscalls(self):
+        """Measure system calls (Linux only)"""
+        try:
+            import subprocess
+            
+            # Use strace to count syscalls
+            script = '''
+import os
+from pathlib import Path
+
+queue = Path("/tmp/syscall_test")
+queue.mkdir(exist_ok=True)
+
+for i in range(100):
+    f = queue / f"test_{i}"
+    f.write_text("test")
+    os.rename(f, f.with_suffix(".done"))
+    f.with_suffix(".done").unlink()
+
+queue.rmdir()
+'''
+            
+            result = subprocess.run(
+                ['strace', '-c', 'python3', '-c', script],
+                capture_output=True,
+                text=True
+            )
+            
+            print("\n=== System Call Profile ===")
+            print(result.stderr)
+            
+        except Exception as e:
+            print(f"Could not run strace: {e}")
+
+# TODO: Add more profiling
+# - [ ] Memory usage profiling
+# - [ ] Cache behavior analysis
+# - [ ] Context switch measurement
+# - [ ] I/O wait time analysis
+
+if __name__ == "__main__":
+    profiler = IPCProfiler()
+    profiler.profile_file_queue()
+    profiler.measure_syscalls()
+#+end_src
+
+*** Optimization Strategies
+
+#+begin_src python :tangle benchmarks/optimization_demo.py :mkdirp yes
+"""
+Demonstrate optimization techniques for filesystem IPC.
+"""
+
+import os
+import time
+from pathlib import Path
+
+class OptimizationDemo:
+    """Show optimization techniques"""
+    
+    def __init__(self):
+        self.test_dir = Path("/tmp/opt_demo")
+        self.test_dir.mkdir(exist_ok=True)
+        
+    def demo_batch_operations(self):
+        """Show benefit of batching"""
+        print("\n=== Batch Operations Demo ===")
+        
+        # Individual operations
+        start = time.time()
+        for i in range(1000):
+            f = self.test_dir / f"individual_{i}"
+            f.touch()
+            f.unlink()
+        individual_time = time.time() - start
+        
+        # Batched operations
+        start = time.time()
+        
+        # Create all files
+        files = []
+        for i in range(1000):
+            f = self.test_dir / f"batch_{i}"
+            f.touch()
+            files.append(f)
+        
+        # Delete all files
+        for f in files:
+            f.unlink()
+        
+        batch_time = time.time() - start
+        
+        print(f"Individual: {individual_time:.3f}s")
+        print(f"Batched: {batch_time:.3f}s")
+        print(f"Speedup: {individual_time/batch_time:.1f}x")
+    
+    def demo_memory_mapping(self):
+        """Show mmap performance benefit"""
+        import mmap
+        
+        print("\n=== Memory Mapping Demo ===")
+        
+        data_size = 10 * 1024 * 1024  # 10MB
+        test_file = self.test_dir / "mmap_test"
+        
+        # Create test file
+        test_file.write_bytes(b'x' * data_size)
+        
+        # Regular file I/O
+        start = time.time()
+        for _ in range(100):
+            with open(test_file, 'rb') as f:
+                data = f.read()
+                # Simulate processing
+                _ = data[::1000]
+        regular_time = time.time() - start
+        
+        # Memory mapped I/O
+        start = time.time()
+        with open(test_file, 'rb') as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m:
+                for _ in range(100):
+                    # Simulate processing
+                    _ = m[::1000]
+        mmap_time = time.time() - start
+        
+        print(f"Regular I/O: {regular_time:.3f}s")
+        print(f"Memory mapped: {mmap_time:.3f}s")
+        print(f"Speedup: {regular_time/mmap_time:.1f}x")
+        
+        test_file.unlink()
+    
+    def demo_directory_sharding(self):
+        """Show benefit of directory sharding"""
+        print("\n=== Directory Sharding Demo ===")
+        
+        num_files = 10000
+        
+        # Single directory
+        single_dir = self.test_dir / "single"
+        single_dir.mkdir()
+        
+        start = time.time()
+        for i in range(num_files):
+            (single_dir / f"file_{i}").touch()
+        
+        # List directory
+        list(single_dir.iterdir())
+        single_time = time.time() - start
+        
+        # Cleanup
+        for f in single_dir.iterdir():
+            f.unlink()
+        single_dir.rmdir()
+        
+        # Sharded directories
+        shard_base = self.test_dir / "sharded"
+        shard_base.mkdir()
+        
+        start = time.time()
+        for i in range(num_files):
+            # Shard by first hex digit
+            shard = shard_base / f"{i % 16:x}"
+            shard.mkdir(exist_ok=True)
+            (shard / f"file_{i}").touch()
+        
+        # List all shards
+        for shard in shard_base.iterdir():
+            list(shard.iterdir())
+        
+        sharded_time = time.time() - start
+        
+        print(f"Single directory: {single_time:.3f}s")
+        print(f"Sharded (16 dirs): {sharded_time:.3f}s")
+        print(f"Speedup: {single_time/sharded_time:.1f}x")
+
+# TODO: Add more optimization demos
+# - [ ] O_DIRECT for bypassing cache
+# - [ ] Preallocating files
+# - [ ] Using sparse files
+# - [ ] Async I/O patterns
+
+if __name__ == "__main__":
+    demo = OptimizationDemo()
+    demo.demo_batch_operations()
+    demo.demo_memory_mapping()
+    demo.demo_directory_sharding()
+#+end_src
+
+** Performance Guidelines
+
+*** Best Practices Summary
+
+| Operation | Best Practice | Rationale |
+|-----------|---------------|-----------|
+| Message Queue | Use directories with atomic rename | Avoids locking, scales well |
+| Small Messages | Use pipes or sockets | Lower latency than files |
+| Large Data | Use shared memory or mmap | Avoids copying |
+| Many Files | Shard across directories | Reduces directory size |
+| Persistence | Batch writes with fsync | Reduces sync overhead |
+| Polling | Use inotify/kqueue | Avoids busy waiting |
+
+*** Performance Limits
+
+TODO: Document observed limits
+- [ ] Maximum messages/second for different methods
+- [ ] Scalability limits (number of processes)
+- [ ] File size impact on performance
+- [ ] Directory entry count impact
+
+** Next Steps
+
+Continue to [[file:07-security-implications.org][Chapter 7: Security Implications]] to understand security considerations.
+
+* Exercises
+
+1. **Benchmark Your System**: Run the benchmarks on different hardware/filesystems
+2. **Optimize a Pattern**: Take a pattern from Chapter 3 and optimize it
+3. **Profile Real Application**: Profile filesystem IPC in a real application
+4. **Create Dashboard**: Build a real-time performance dashboard for IPC

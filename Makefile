@@ -1,0 +1,109 @@
+# Makefile for Filesystem Communication Space
+# Handles tangling org files, running experiments, and generating diagrams
+
+.PHONY: all tangle experiments benchmark diagrams clean help
+
+# Default target
+all: tangle diagrams
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all         - Tangle code and generate diagrams (default)"
+	@echo "  tangle      - Extract source code from org files"
+	@echo "  experiments - Run all experiments"
+	@echo "  benchmark   - Run performance benchmarks"
+	@echo "  diagrams    - Generate Mermaid diagrams"
+	@echo "  clean       - Remove generated files"
+	@echo "  help        - Show this help message"
+
+# Tangle all org files to extract source code
+tangle:
+	@echo "Tangling source code from org files..."
+	@for file in *.org; do \
+		if [ -f "$$file" ]; then \
+			echo "Processing $$file..."; \
+			emacs --batch \
+				--eval "(require 'org)" \
+				--eval "(setq org-babel-python-command \"python3\")" \
+				--eval "(setq org-confirm-babel-evaluate nil)" \
+				--eval "(org-babel-tangle-file \"$$file\")"; \
+		fi; \
+	done
+	@echo "Tangling complete!"
+
+# Run all experiments
+experiments: tangle
+	@echo "Running experiments..."
+	@if [ -d "experiments" ]; then \
+		for script in experiments/*.py; do \
+			if [ -f "$$script" ] && [ -x "$$script" ]; then \
+				echo "Running $$script..."; \
+				python3 "$$script" || true; \
+			fi; \
+		done; \
+	fi
+	@echo "Experiments complete!"
+
+# Run benchmarks
+benchmark: tangle
+	@echo "Running benchmarks..."
+	@if [ -f "experiments/benchmark_ipc.py" ]; then \
+		python3 experiments/benchmark_ipc.py; \
+	fi
+	@if [ -f "experiments/measure_throughput.py" ]; then \
+		python3 experiments/measure_throughput.py; \
+	fi
+	@echo "Benchmarks complete!"
+
+# Generate Mermaid diagrams
+diagrams:
+	@echo "Generating Mermaid diagrams..."
+	@mkdir -p diagrams
+	@for file in *.org; do \
+		if [ -f "$$file" ]; then \
+			echo "Extracting diagrams from $$file..."; \
+			emacs --batch \
+				--eval "(require 'org)" \
+				--eval "(setq org-confirm-babel-evaluate nil)" \
+				--eval "(require 'ob-mermaid)" \
+				--eval "(org-babel-execute-buffer)" \
+				--visit="$$file" \
+				2>/dev/null || true; \
+		fi; \
+	done
+	@echo "Diagram generation complete!"
+
+# Clean generated files
+clean:
+	@echo "Cleaning generated files..."
+	@rm -rf experiments/ patterns/ analysis/ security/ core/
+	@rm -f diagrams/*.png diagrams/*.svg
+	@find . -name "*.pyc" -delete
+	@find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+	@echo "Clean complete!"
+
+# Install dependencies (optional)
+install-deps:
+	@echo "Checking dependencies..."
+	@command -v emacs >/dev/null 2>&1 || { echo "Emacs is required but not installed. Aborting." >&2; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { echo "Python 3 is required but not installed. Aborting." >&2; exit 1; }
+	@echo "Installing Python dependencies..."
+	@pip3 install --user matplotlib numpy psutil || true
+	@echo "Dependencies installed!"
+
+# Variables for customization
+EMACS ?= emacs
+PYTHON ?= python3
+
+# Pattern rules for individual file processing
+%.tangle: %.org
+	$(EMACS) --batch \
+		--eval "(require 'org)" \
+		--eval "(setq org-babel-python-command \"$(PYTHON)\")" \
+		--eval "(setq org-confirm-babel-evaluate nil)" \
+		--eval "(org-babel-tangle-file \"$<\")"
+
+# Create directory structure
+setup-dirs:
+	@mkdir -p experiments patterns analysis security core diagrams

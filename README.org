@@ -1,0 +1,80 @@
+#+TITLE: The Filesystem as a Communication Space
+#+AUTHOR: aygp-dr
+#+OPTIONS: toc:3 num:t
+
+* Overview
+
+This repository is a literate programming exploration of the filesystem as a communication space. We examine how the filesystem namespace serves as a meeting point for inter-process communication, cataloging primitives from simple files to sophisticated kernel interfaces.
+
+* Philosophy
+
+The filesystem is more than storage - it's a shared namespace where processes rendezvous. Every IPC mechanism that touches the filesystem (named pipes, Unix sockets, lock files, shared memory) relies on this fundamental property: processes can agree on names.
+
+* Structure
+
+| File                          | Description                                          |
+|-------------------------------+------------------------------------------------------|
+| [[file:00-foundations.org][00-foundations.org]]            | Conceptual foundations and philosophy                |
+| [[file:01-namespace-as-rendezvous.org][01-namespace-as-rendezvous.org]] | The filesystem as meeting point                      |
+| [[file:02-primitives-catalog.org][02-primitives-catalog.org]]     | Complete catalog of filesystem-based IPC             |
+| [[file:03-patterns-and-idioms.org][03-patterns-and-idioms.org]]    | Common patterns across mechanisms                    |
+| [[file:04-case-studies.org][04-case-studies.org]]           | Real-world systems analysis                          |
+| [[file:05-experiments.org][05-experiments.org]]            | Hands-on explorations with runnable code             |
+| [[file:06-performance-analysis.org][06-performance-analysis.org]]   | Benchmarks and measurements                          |
+| [[file:07-security-implications.org][07-security-implications.org]]  | Trust, permissions, and race conditions              |
+| [[file:08-historical-evolution.org][08-historical-evolution.org]]   | From Unix pipes to modern IPC                        |
+| [[file:09-cross-platform.org][09-cross-platform.org]]         | Beyond Unix: Windows, Plan 9, and others             |
+
+* Key Concepts Explored
+
+** The Namespace as Social Contract
+   - How processes agree on meeting points
+   - Permission models and access control
+   - Mount namespaces and containerization
+
+** Communication Primitives Taxonomy
+   - Persistent vs ephemeral channels
+   - Synchronous vs asynchronous patterns
+   - Buffered vs unbuffered communication
+
+** Patterns and Anti-Patterns
+   - Atomic rename pattern for lock-free updates
+   - Directory-based queuing systems
+   - Race condition mitigation strategies
+
+** Performance Characteristics
+   - Comparative benchmarks across IPC methods
+   - Filesystem-specific optimizations
+   - Cache effects and memory mapping
+
+* Building and Running
+
+#+begin_src bash
+# Tangle all source code from org files
+make tangle
+
+# Run all experiments
+make experiments
+
+# Run benchmarks
+make benchmark
+
+# Generate all diagrams
+make diagrams
+#+end_src
+
+* Repository Features
+
+- *Executable Documentation*: Every concept includes runnable code
+- *Visual Models*: Mermaid diagrams illustrate patterns and flows
+- *Comparative Analysis*: Benchmarks across different IPC mechanisms
+- *Security Focus*: Explicit attention to race conditions and vulnerabilities
+- *Historical Context*: Evolution from early Unix to modern systems
+
+* Contributing
+
+This is a living document exploring fundamental concepts in systems programming. Contributions that deepen understanding of filesystem-based communication are welcome.
+
+* License
+
+[License information to be added]

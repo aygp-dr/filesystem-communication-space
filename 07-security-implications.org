@@ -1,0 +1,1307 @@
+#+TITLE: Security Implications of Filesystem IPC
+#+AUTHOR: AYGP-DR
+#+DATE: 2025-06-28
+#+OPTIONS: toc:2 num:t
+
+* Trust, Permissions, and Race Conditions
+
+** Overview
+
+This chapter examines the security implications of using the filesystem for inter-process communication, including common vulnerabilities, attack vectors, and defensive programming techniques.
+
+** Threat Model
+
+*** Attack Vectors
+
+#+begin_src python :tangle security/threat_model.py :mkdirp yes
+"""
+Threat model for filesystem-based IPC.
+"""
+
+from enum import Enum, auto
+from dataclasses import dataclass
+from typing import List, Set
+
+class ThreatCategory(Enum):
+    """Categories of security threats"""
+    UNAUTHORIZED_ACCESS = auto()
+    INFORMATION_DISCLOSURE = auto()
+    DENIAL_OF_SERVICE = auto()
+    PRIVILEGE_ESCALATION = auto()
+    DATA_CORRUPTION = auto()
+    RACE_CONDITION = auto()
+
+class AttackVector(Enum):
+    """Common attack vectors"""
+    SYMLINK_ATTACK = auto()
+    TOCTOU_RACE = auto()
+    PERMISSION_BYPASS = auto()
+    PATH_TRAVERSAL = auto()
+    RESOURCE_EXHAUSTION = auto()
+    SIGNAL_RACE = auto()
+    HARDLINK_ATTACK = auto()
+
+@dataclass
+class Threat:
+    """Security threat description"""
+    name: str
+    category: ThreatCategory
+    vectors: List[AttackVector]
+    impact: str
+    likelihood: str  # Low, Medium, High
+    mitigations: List[str]
+
+class FilesystemIPCThreatModel:
+    """Comprehensive threat model"""
+    
+    def __init__(self):
+        self.threats = self._define_threats()
+    
+    def _define_threats(self) -> List[Threat]:
+        """Define known threats"""
+        return [
+            Threat(
+                name="Symlink Race Attack",
+                category=ThreatCategory.PRIVILEGE_ESCALATION,
+                vectors=[AttackVector.SYMLINK_ATTACK, AttackVector.TOCTOU_RACE],
+                impact="Attacker can redirect file operations to arbitrary targets",
+                likelihood="High",
+                mitigations=[
+                    "Use O_NOFOLLOW when opening files",
+                    "Create files with O_EXCL",
+                    "Validate file type after opening",
+                    "Use mkstemp() for temporary files"
+                ]
+            ),
+            Threat(
+                name="Permission Race Condition",
+                category=ThreatCategory.UNAUTHORIZED_ACCESS,
+                vectors=[AttackVector.PERMISSION_BYPASS, AttackVector.RACE_CONDITION],
+                impact="Attacker gains access to protected resources",
+                likelihood="Medium",
+                mitigations=[
+                    "Set umask before file creation",
+                    "Use atomic permission setting",
+                    "Create files in protected directories",
+                    "Verify permissions after creation"
+                ]
+            ),
+            Threat(
+                name="Denial of Service via Resource Exhaustion",
+                category=ThreatCategory.DENIAL_OF_SERVICE,
+                vectors=[AttackVector.RESOURCE_EXHAUSTION],
+                impact="System becomes unresponsive or crashes",
+                likelihood="High",
+                mitigations=[
+                    "Implement rate limiting",
+                    "Set resource quotas",
+                    "Monitor resource usage",
+                    "Use cleanup processes"
+                ]
+            ),
+            Threat(
+                name="Information Disclosure via World-Readable Files",
+                category=ThreatCategory.INFORMATION_DISCLOSURE,
+                vectors=[AttackVector.PERMISSION_BYPASS],
+                impact="Sensitive data exposed to unauthorized users",
+                likelihood="High",
+                mitigations=[
+                    "Set restrictive default permissions",
+                    "Audit file permissions regularly",
+                    "Use encrypted communication",
+                    "Implement access logging"
+                ]
+            )
+        ]
+    
+    def assess_risk(self, threat: Threat) -> str:
+        """Simple risk assessment"""
+        likelihood_score = {"Low": 1, "Medium": 2, "High": 3}
+        impact_score = {"Low": 1, "Medium": 2, "High": 3}
+        
+        # Simplified - in reality would be more complex
+        if "arbitrary code execution" in threat.impact.lower():
+            return "Critical"
+        elif threat.likelihood == "High":
+            return "High"
+        else:
+            return "Medium"
+    
+    def get_mitigations_for_vector(self, vector: AttackVector) -> Set[str]:
+        """Get all mitigations for a specific attack vector"""
+        mitigations = set()
+        
+        for threat in self.threats:
+            if vector in threat.vectors:
+                mitigations.update(threat.mitigations)
+        
+        return mitigations
+#+end_src
+
+** Common Vulnerabilities
+
+*** Time-of-Check to Time-of-Use (TOCTOU)
+
+#+begin_src python :tangle security/toctou_vulnerabilities.py :mkdirp yes
+"""
+TOCTOU vulnerability demonstrations and mitigations.
+"""
+
+import os
+import stat
+import time
+from pathlib import Path
+from typing import Optional
+
+class TOCTOUVulnerabilities:
+    """Examples of TOCTOU vulnerabilities"""
+    
+    @staticmethod
+    def vulnerable_file_check(filepath: str) -> Optional[str]:
+        """VULNERABLE: Classic TOCTOU pattern"""
+        path = Path(filepath)
+        
+        # TIME OF CHECK
+        if path.exists() and path.is_file():
+            # Race window! Attacker can change the file here
+            time.sleep(0.001)  # Simulate processing time
+            
+            # TIME OF USE
+            with open(filepath, 'r') as f:
+                return f.read()
+        
+        return None
+    
+    @staticmethod
+    def secure_file_open(filepath: str) -> Optional[str]:
+        """SECURE: Avoid TOCTOU by checking after opening"""
+        try:
+            # Open with O_NOFOLLOW to prevent symlink attacks
+            fd = os.open(filepath, os.O_RDONLY | os.O_NOFOLLOW)
+            
+            # Check file properties using file descriptor
+            stat_info = os.fstat(fd)
+            
+            # Verify it's a regular file
+            if not stat.S_ISREG(stat_info.st_mode):
+                os.close(fd)
+                return None
+            
+            # Now safe to read
+            with os.fdopen(fd, 'r') as f:
+                return f.read()
+                
+        except (OSError, IOError):
+            return None
+    
+    @staticmethod
+    def vulnerable_temp_file():
+        """VULNERABLE: Predictable temp file creation"""
+        import tempfile
+        
+        # TIME OF CHECK
+        temp_path = f"/tmp/myapp_{os.getpid()}.tmp"
+        if not os.path.exists(temp_path):
+            # Race window! Attacker can create symlink here
+            
+            # TIME OF USE
+            with open(temp_path, 'w') as f:
+                f.write("sensitive data")
+    
+    @staticmethod
+    def secure_temp_file():
+        """SECURE: Use atomic temp file creation"""
+        import tempfile
+        
+        # mkstemp creates file atomically with O_EXCL
+        fd, temp_path = tempfile.mkstemp(prefix="myapp_")
+        
+        try:
+            with os.fdopen(fd, 'w') as f:
+                f.write("sensitive data")
+            
+            # Use temp_path as needed
+            
+        finally:
+            # Clean up
+            os.unlink(temp_path)
+    
+    @staticmethod
+    def demonstrate_race_window():
+        """Demonstrate exploitable race window"""
+        target = Path("/tmp/race_demo")
+        
+        def attacker_thread():
+            """Attacker trying to exploit race"""
+            while True:
+                try:
+                    # Remove legitimate file
+                    target.unlink()
+                    # Create malicious symlink
+                    os.symlink("/etc/passwd", target)
+                except OSError:
+                    pass
+                
+                try:
+                    # Remove symlink
+                    target.unlink()
+                    # Create legitimate file
+                    target.write_text("legitimate content")
+                except OSError:
+                    pass
+        
+        def victim_thread():
+            """Victim with TOCTOU vulnerability"""
+            exploited = False
+            
+            for _ in range(1000):
+                # Vulnerable check
+                if target.exists() and target.is_file():
+                    content = target.read_text()
+                    if "root:" in content:
+                        exploited = True
+                        break
+            
+            return exploited
+        
+        # In real demo, would run these in separate threads
+        # return victim_thread()
+
+class SecurePrimitives:
+    """Secure alternatives to common operations"""
+    
+    @staticmethod
+    def secure_create(filepath: str, mode: int = 0o600) -> int:
+        """Securely create a file"""
+        # Use O_EXCL to fail if file exists
+        # Use O_NOFOLLOW to prevent symlink attacks
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW
+        
+        # Set umask to ensure restrictive permissions
+        old_umask = os.umask(0o077)
+        
+        try:
+            fd = os.open(filepath, flags, mode)
+            return fd
+        finally:
+            os.umask(old_umask)
+    
+    @staticmethod
+    def secure_directory_create(dirpath: str, mode: int = 0o700):
+        """Securely create a directory"""
+        path = Path(dirpath)
+        
+        # Set restrictive umask
+        old_umask = os.umask(0o077)
+        
+        try:
+            path.mkdir(mode=mode, exist_ok=False)
+            
+            # Verify permissions were set correctly
+            stat_info = path.stat()
+            actual_mode = stat.S_IMODE(stat_info.st_mode)
+            
+            if actual_mode != mode:
+                # Permission setting failed, remove and fail
+                path.rmdir()
+                raise PermissionError(f"Could not set mode {mode:o}")
+                
+        finally:
+            os.umask(old_umask)
+#+end_src
+
+*** Symlink and Hardlink Attacks
+
+#+begin_src python :tangle security/link_attacks.py :mkdirp yes
+"""
+Symlink and hardlink attack patterns and defenses.
+"""
+
+import os
+import stat
+from pathlib import Path
+
+class LinkAttacks:
+    """Common link-based attacks"""
+    
+    @staticmethod
+    def symlink_attack_demo():
+        """Demonstrate symlink attack"""
+        # Attacker creates symlink pointing to sensitive file
+        victim_file = "/tmp/victim_data"
+        sensitive_target = "/etc/passwd"
+        
+        try:
+            # Attacker's action
+            os.symlink(sensitive_target, victim_file)
+            
+            # Victim's vulnerable code
+            with open(victim_file, 'r') as f:
+                # Victim thinks they're reading their own file
+                # but actually reading /etc/passwd
+                data = f.read()
+                
+            return "symlink attack successful" in data
+            
+        except Exception as e:
+            return False
+        finally:
+            try:
+                os.unlink(victim_file)
+            except:
+                pass
+    
+    @staticmethod
+    def defend_against_symlinks(filepath: str) -> bool:
+        """Check if path contains symlinks"""
+        path = Path(filepath)
+        
+        # Check each component of the path
+        parts = path.parts
+        current = Path("/")
+        
+        for part in parts[1:]:  # Skip root
+            current = current / part
+            
+            try:
+                # lstat doesn't follow symlinks
+                stat_info = current.lstat()
+                
+                if stat.S_ISLNK(stat_info.st_mode):
+                    return False  # Symlink detected
+                    
+            except OSError:
+                return False  # Path doesn't exist
+        
+        return True
+    
+    @staticmethod
+    def secure_open_no_symlinks(filepath: str, flags: int = os.O_RDONLY):
+        """Open file ensuring no symlinks in path"""
+        # Use O_NOFOLLOW to prevent following symlinks
+        try:
+            fd = os.open(filepath, flags | os.O_NOFOLLOW)
+            
+            # Additional check: compare device/inode
+            stat1 = os.fstat(fd)
+            stat2 = os.stat(filepath)
+            
+            if (stat1.st_dev != stat2.st_dev or 
+                stat1.st_ino != stat2.st_ino):
+                # File changed between open and stat
+                os.close(fd)
+                raise SecurityError("File identity changed")
+            
+            return fd
+            
+        except OSError as e:
+            if e.errno == 40:  # ELOOP - too many symlinks
+                raise SecurityError("Symlink detected")
+            raise
+    
+    @staticmethod
+    def hardlink_attack_demo():
+        """Demonstrate hardlink attack"""
+        # Hardlinks can be used to:
+        # 1. Retain access to files after permissions change
+        # 2. Prevent file deletion
+        # 3. Confuse quota systems
+        
+        original = "/tmp/original_file"
+        hardlink = "/tmp/attacker_link"
+        
+        try:
+            # Create original file
+            Path(original).write_text("sensitive data")
+            os.chmod(original, 0o600)  # Restrict permissions
+            
+            # Attacker creates hardlink while they have access
+            os.link(original, hardlink)
+            
+            # Even if original permissions change or file is "deleted"
+            os.chmod(original, 0o000)  # No permissions
+            os.unlink(original)  # "Delete" original
+            
+            # Attacker still has access via hardlink
+            data = Path(hardlink).read_text()
+            
+            return data == "sensitive data"
+            
+        except Exception:
+            return False
+        finally:
+            try:
+                os.unlink(hardlink)
+            except:
+                pass
+    
+    @staticmethod
+    def defend_against_hardlinks(filepath: str):
+        """Check for unexpected hardlinks"""
+        try:
+            stat_info = os.stat(filepath)
+            
+            # st_nlink is the number of hardlinks
+            if stat_info.st_nlink > 1:
+                # File has additional hardlinks
+                return False
+            
+            return True
+            
+        except OSError:
+            return False
+
+class SecureFileOperations:
+    """Secure file operation patterns"""
+    
+    @staticmethod
+    def create_secure_temp_dir() -> Path:
+        """Create a secure temporary directory"""
+        import tempfile
+        
+        # mkdtemp creates directory with 0o700 permissions
+        temp_dir = tempfile.mkdtemp(prefix="secure_")
+        
+        # Verify permissions
+        stat_info = os.stat(temp_dir)
+        mode = stat.S_IMODE(stat_info.st_mode)
+        
+        if mode != 0o700:
+            # Permissions not as expected
+            os.rmdir(temp_dir)
+            raise SecurityError("Could not create secure directory")
+        
+        return Path(temp_dir)
+    
+    @staticmethod
+    def safe_file_write(filepath: str, data: bytes, mode: int = 0o600):
+        """Safely write to a file"""
+        path = Path(filepath)
+        
+        # Use atomic write pattern
+        import tempfile
+        fd, temp_path = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp"
+        )
+        
+        try:
+            # Write data
+            os.write(fd, data)
+            os.fsync(fd)
+            os.close(fd)
+            
+            # Set permissions
+            os.chmod(temp_path, mode)
+            
+            # Atomic rename
+            os.rename(temp_path, filepath)
+            
+        except Exception:
+            # Clean up on error
+            try:
+                os.close(fd)
+            except:
+                pass
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+            raise
+#+end_src
+
+*** Permission and Ownership Issues
+
+#+begin_src python :tangle security/permission_security.py :mkdirp yes
+"""
+Permission-based security issues and solutions.
+"""
+
+import os
+import pwd
+import grp
+import stat
+from pathlib import Path
+from typing import Optional, Tuple
+
+class PermissionSecurity:
+    """Handle permission-based security"""
+    
+    @staticmethod
+    def check_path_ownership(filepath: str) -> Tuple[int, int]:
+        """Get ownership of file"""
+        stat_info = os.stat(filepath)
+        return stat_info.st_uid, stat_info.st_gid
+    
+    @staticmethod
+    def verify_safe_ownership(filepath: str, 
+                            allowed_uid: Optional[int] = None,
+                            allowed_gid: Optional[int] = None) -> bool:
+        """Verify file has safe ownership"""
+        uid, gid = PermissionSecurity.check_path_ownership(filepath)
+        
+        # Default to current user if not specified
+        if allowed_uid is None:
+            allowed_uid = os.getuid()
+        
+        # Check ownership
+        if uid != allowed_uid:
+            return False
+        
+        if allowed_gid is not None and gid != allowed_gid:
+            return False
+        
+        return True
+    
+    @staticmethod
+    def check_world_writable(filepath: str) -> bool:
+        """Check if file/directory is world writable"""
+        stat_info = os.stat(filepath)
+        mode = stat_info.st_mode
+        
+        # Check if other-writable bit is set
+        return bool(mode & stat.S_IWOTH)
+    
+    @staticmethod
+    def secure_shared_directory(dirpath: str, group_name: str) -> Path:
+        """Create a secure directory for group sharing"""
+        path = Path(dirpath)
+        
+        # Get group ID
+        try:
+            group_info = grp.getgrnam(group_name)
+            gid = group_info.gr_gid
+        except KeyError:
+            raise ValueError(f"Group {group_name} not found")
+        
+        # Create directory with restricted permissions
+        old_umask = os.umask(0o007)  # Remove all permissions for others
+        
+        try:
+            path.mkdir(mode=0o2770, exist_ok=True)  # SGID bit set
+            
+            # Set group ownership
+            os.chown(path, -1, gid)  # -1 means don't change uid
+            
+            # Verify permissions
+            stat_info = path.stat()
+            actual_mode = stat.S_IMODE(stat_info.st_mode)
+            
+            if actual_mode != 0o2770:
+                raise PermissionError("Could not set secure permissions")
+            
+            if stat_info.st_gid != gid:
+                raise PermissionError("Could not set group ownership")
+            
+            return path
+            
+        finally:
+            os.umask(old_umask)
+    
+    @staticmethod
+    def audit_directory_tree(root_path: str) -> list:
+        """Audit a directory tree for security issues"""
+        issues = []
+        root = Path(root_path)
+        
+        for path in root.rglob("*"):
+            try:
+                stat_info = path.stat()
+                mode = stat_info.st_mode
+                
+                # Check for world-writable files
+                if stat.S_IWOTH & mode:
+                    issues.append({
+                        'path': str(path),
+                        'issue': 'world-writable',
+                        'mode': oct(stat.S_IMODE(mode))
+                    })
+                
+                # Check for setuid/setgid files
+                if stat.S_ISUID & mode or stat.S_ISGID & mode:
+                    issues.append({
+                        'path': str(path),
+                        'issue': 'setuid/setgid',
+                        'mode': oct(stat.S_IMODE(mode))
+                    })
+                
+                # Check for files not owned by current user
+                if stat_info.st_uid != os.getuid():
+                    issues.append({
+                        'path': str(path),
+                        'issue': 'foreign-owned',
+                        'uid': stat_info.st_uid
+                    })
+                
+            except OSError as e:
+                issues.append({
+                    'path': str(path),
+                    'issue': 'access-error',
+                    'error': str(e)
+                })
+        
+        return issues
+
+class UmaskManager:
+    """Manage umask for secure file creation"""
+    
+    def __init__(self, new_umask: int):
+        self.new_umask = new_umask
+        self.old_umask = None
+    
+    def __enter__(self):
+        self.old_umask = os.umask(self.new_umask)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.old_umask is not None:
+            os.umask(self.old_umask)
+
+# Example usage of secure patterns
+def create_secure_ipc_file(filepath: str, data: bytes):
+    """Create a file securely for IPC"""
+    
+    # Use restrictive umask
+    with UmaskManager(0o077):
+        # Create with O_EXCL to prevent races
+        fd = os.open(filepath,
+                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                    0o600)
+        
+        try:
+            # Write data
+            os.write(fd, data)
+            os.fsync(fd)
+            
+            # Verify permissions before closing
+            stat_info = os.fstat(fd)
+            mode = stat.S_IMODE(stat_info.st_mode)
+            
+            if mode != 0o600:
+                raise PermissionError(f"Unexpected mode: {oct(mode)}")
+            
+        finally:
+            os.close(fd)
+#+end_src
+
+** Defensive Programming
+
+*** Input Validation and Sanitization
+
+#+begin_src python :tangle security/input_validation.py :mkdirp yes
+"""
+Input validation for filesystem IPC security.
+"""
+
+import os
+import re
+from pathlib import Path
+from typing import Optional
+
+class PathValidator:
+    """Validate and sanitize filesystem paths"""
+    
+    # Regex patterns for validation
+    SAFE_FILENAME = re.compile(r'^[a-zA-Z0-9._-]+$')
+    SAFE_PATH_COMPONENT = re.compile(r'^[a-zA-Z0-9._-]+$')
+    
+    @staticmethod
+    def validate_filename(filename: str) -> bool:
+        """Validate a filename is safe"""
+        if not filename or len(filename) > 255:
+            return False
+        
+        # Check for path traversal attempts
+        if '..' in filename or '/' in filename or '\\' in filename:
+            return False
+        
+        # Check for null bytes
+        if '\0' in filename:
+            return False
+        
+        # Check against safe pattern
+        return bool(PathValidator.SAFE_FILENAME.match(filename))
+    
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """Sanitize a filename to be safe"""
+        # Remove path separators and traversal
+        filename = filename.replace('/', '_')
+        filename = filename.replace('\\', '_')
+        filename = filename.replace('..', '_')
+        
+        # Remove null bytes
+        filename = filename.replace('\0', '')
+        
+        # Replace unsafe characters
+        safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_')
+        filename = ''.join(c if c in safe_chars else '_' for c in filename)
+        
+        # Limit length
+        filename = filename[:255]
+        
+        # Ensure not empty
+        if not filename:
+            filename = 'unnamed'
+        
+        return filename
+    
+    @staticmethod
+    def validate_path(filepath: str, base_dir: str) -> bool:
+        """Validate path is within base directory"""
+        try:
+            # Resolve to absolute paths
+            base = Path(base_dir).resolve()
+            target = Path(filepath).resolve()
+            
+            # Check if target is within base
+            try:
+                target.relative_to(base)
+                return True
+            except ValueError:
+                return False
+                
+        except Exception:
+            return False
+    
+    @staticmethod
+    def join_path_safe(base_dir: str, *components: str) -> Optional[str]:
+        """Safely join path components"""
+        # Validate base directory exists
+        base = Path(base_dir)
+        if not base.exists() or not base.is_dir():
+            return None
+        
+        # Validate each component
+        for component in components:
+            if not PathValidator.SAFE_PATH_COMPONENT.match(component):
+                return None
+        
+        # Join and resolve
+        result = base
+        for component in components:
+            result = result / component
+        
+        # Ensure still within base
+        try:
+            result.resolve().relative_to(base.resolve())
+        except ValueError:
+            return None
+        
+        return str(result)
+
+class MessageValidator:
+    """Validate IPC messages"""
+    
+    @staticmethod
+    def validate_size(data: bytes, max_size: int) -> bool:
+        """Validate message size"""
+        return 0 < len(data) <= max_size
+    
+    @staticmethod
+    def validate_json_message(data: str, schema: dict) -> bool:
+        """Validate JSON message against schema"""
+        import json
+        
+        try:
+            message = json.loads(data)
+        except json.JSONDecodeError:
+            return False
+        
+        # Simple schema validation
+        for key, expected_type in schema.items():
+            if key not in message:
+                return False
+            
+            if not isinstance(message[key], expected_type):
+                return False
+        
+        return True
+
+class RateLimiter:
+    """Rate limiting for IPC operations"""
+    
+    def __init__(self, max_ops: int, window_seconds: float):
+        self.max_ops = max_ops
+        self.window = window_seconds
+        self.operations = {}  # pid -> list of timestamps
+    
+    def check_rate_limit(self, pid: int) -> bool:
+        """Check if operation is within rate limit"""
+        import time
+        
+        now = time.time()
+        
+        # Clean old entries
+        if pid in self.operations:
+            self.operations[pid] = [
+                ts for ts in self.operations[pid]
+                if now - ts < self.window
+            ]
+        else:
+            self.operations[pid] = []
+        
+        # Check limit
+        if len(self.operations[pid]) >= self.max_ops:
+            return False
+        
+        # Record operation
+        self.operations[pid].append(now)
+        return True
+
+# Example secure IPC endpoint
+def secure_message_handler(message_file: str, base_dir: str):
+    """Handle IPC message with validation"""
+    
+    # Validate path
+    if not PathValidator.validate_path(message_file, base_dir):
+        raise ValueError("Invalid message path")
+    
+    # Check ownership
+    if not PermissionSecurity.verify_safe_ownership(message_file):
+        raise PermissionError("Unsafe file ownership")
+    
+    # Read with size limit
+    max_size = 1024 * 1024  # 1MB
+    
+    try:
+        with open(message_file, 'rb') as f:
+            data = f.read(max_size + 1)
+            
+        if len(data) > max_size:
+            raise ValueError("Message too large")
+        
+        # Process message...
+        
+    finally:
+        # Clean up
+        try:
+            os.unlink(message_file)
+        except OSError:
+            pass
+#+end_src
+
+*** Secure Coding Patterns
+
+#+begin_src python :tangle security/secure_patterns.py :mkdirp yes
+"""
+Secure coding patterns for filesystem IPC.
+"""
+
+import os
+import hashlib
+import hmac
+import json
+from pathlib import Path
+from contextlib import contextmanager
+from typing import Optional
+
+class SecureChannel:
+    """Secure IPC channel implementation"""
+    
+    def __init__(self, channel_dir: str, shared_secret: bytes):
+        self.channel_dir = Path(channel_dir)
+        self.shared_secret = shared_secret
+        
+        # Create channel directory securely
+        old_umask = os.umask(0o077)
+        try:
+            self.channel_dir.mkdir(mode=0o700, exist_ok=True)
+        finally:
+            os.umask(old_umask)
+    
+    def send_authenticated(self, recipient: str, message: dict):
+        """Send authenticated message"""
+        # Serialize message
+        payload = json.dumps(message, sort_keys=True).encode()
+        
+        # Compute HMAC
+        h = hmac.new(self.shared_secret, payload, hashlib.sha256)
+        mac = h.hexdigest()
+        
+        # Create message file
+        msg_id = hashlib.sha256(payload).hexdigest()[:16]
+        msg_file = self.channel_dir / f"{recipient}.{msg_id}.msg"
+        
+        # Write atomically
+        tmp_file = msg_file.with_suffix('.tmp')
+        
+        old_umask = os.umask(0o077)
+        try:
+            with open(tmp_file, 'w') as f:
+                json.dump({
+                    'payload': payload.decode(),
+                    'mac': mac
+                }, f)
+            
+            os.rename(tmp_file, msg_file)
+            
+        finally:
+            os.umask(old_umask)
+    
+    def receive_authenticated(self, recipient: str) -> Optional[dict]:
+        """Receive and verify authenticated message"""
+        pattern = f"{recipient}.*.msg"
+        
+        for msg_file in self.channel_dir.glob(pattern):
+            try:
+                # Claim message
+                claimed = msg_file.with_suffix('.claimed')
+                os.rename(msg_file, claimed)
+                
+                # Read message
+                with open(claimed) as f:
+                    data = json.load(f)
+                
+                # Verify MAC
+                payload = data['payload'].encode()
+                expected_mac = data['mac']
+                
+                h = hmac.new(self.shared_secret, payload, hashlib.sha256)
+                actual_mac = h.hexdigest()
+                
+                # Constant-time comparison
+                if hmac.compare_digest(expected_mac, actual_mac):
+                    # Valid message
+                    os.unlink(claimed)
+                    return json.loads(payload)
+                else:
+                    # Invalid MAC - possible tampering
+                    # Log security event
+                    os.unlink(claimed)
+                    
+            except (OSError, KeyError, json.JSONDecodeError):
+                # Clean up bad message
+                try:
+                    claimed.unlink()
+                except:
+                    pass
+        
+        return None
+
+class SecureQueue:
+    """Secure queue with access control"""
+    
+    def __init__(self, queue_dir: str, allowed_gid: int):
+        self.queue_dir = Path(queue_dir)
+        self.allowed_gid = allowed_gid
+        
+        # Create queue directory with group access
+        old_umask = os.umask(0o007)
+        try:
+            self.queue_dir.mkdir(mode=0o2770, exist_ok=True)
+            os.chown(self.queue_dir, -1, allowed_gid)
+        finally:
+            os.umask(old_umask)
+    
+    @contextmanager
+    def transaction(self):
+        """Transactional queue operations"""
+        transaction_id = os.urandom(16).hex()
+        transaction_dir = self.queue_dir / f".tx_{transaction_id}"
+        
+        # Create transaction directory
+        old_umask = os.umask(0o077)
+        try:
+            transaction_dir.mkdir(mode=0o700)
+        finally:
+            os.umask(old_umask)
+        
+        try:
+            yield transaction_dir
+            
+            # Commit transaction - move all files to queue
+            for item in transaction_dir.iterdir():
+                dest = self.queue_dir / item.name
+                os.rename(item, dest)
+            
+        finally:
+            # Clean up transaction directory
+            try:
+                transaction_dir.rmdir()
+            except OSError:
+                # Clean up any remaining files
+                for item in transaction_dir.iterdir():
+                    item.unlink()
+                transaction_dir.rmdir()
+
+class AuditLogger:
+    """Security audit logging for IPC"""
+    
+    def __init__(self, log_dir: str):
+        self.log_dir = Path(log_dir)
+        
+        # Create log directory with restricted permissions
+        old_umask = os.umask(0o077)
+        try:
+            self.log_dir.mkdir(mode=0o700, exist_ok=True)
+        finally:
+            os.umask(old_umask)
+    
+    def log_security_event(self, event_type: str, details: dict):
+        """Log security-relevant event"""
+        import time
+        
+        event = {
+            'timestamp': time.time(),
+            'type': event_type,
+            'pid': os.getpid(),
+            'uid': os.getuid(),
+            'details': details
+        }
+        
+        # Create daily log file
+        log_file = self.log_dir / f"security_{time.strftime('%Y%m%d')}.log"
+        
+        # Append to log with exclusive lock
+        import fcntl
+        
+        old_umask = os.umask(0o077)
+        try:
+            with open(log_file, 'a') as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                json.dump(event, f)
+                f.write('\n')
+                f.flush()
+                os.fsync(f.fileno())
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        finally:
+            os.umask(old_umask)
+
+# Example: Privilege separation pattern
+class PrivilegeSeparation:
+    """Demonstrate privilege separation for IPC"""
+    
+    @staticmethod
+    def drop_privileges(uid: int, gid: int):
+        """Drop root privileges"""
+        # Must be called as root
+        if os.getuid() != 0:
+            return
+        
+        # Drop supplementary groups
+        os.setgroups([])
+        
+        # Set GID first (while still root)
+        os.setgid(gid)
+        
+        # Set UID (loses root privileges)
+        os.setuid(uid)
+        
+        # Verify privileges dropped
+        if os.getuid() == 0 or os.getgid() == 0:
+            raise RuntimeError("Failed to drop privileges")
+    
+    @staticmethod
+    def create_privileged_socket(socket_path: str, uid: int, gid: int):
+        """Create socket with specific ownership"""
+        import socket
+        
+        # Must be root to change ownership
+        if os.getuid() != 0:
+            raise PermissionError("Must be root")
+        
+        # Create socket
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(socket_path)
+        
+        # Set ownership
+        os.chown(socket_path, uid, gid)
+        os.chmod(socket_path, 0o660)
+        
+        # Drop privileges before returning
+        PrivilegeSeparation.drop_privileges(uid, gid)
+        
+        return sock
+#+end_src
+
+** Security Testing
+
+*** Vulnerability Scanner
+
+#+begin_src python :tangle security/vulnerability_scanner.py :mkdirp yes :shebang #!/usr/bin/env python3
+"""
+Scan for common filesystem IPC vulnerabilities.
+"""
+
+import os
+import stat
+from pathlib import Path
+from typing import List, Dict
+
+class VulnerabilityScanner:
+    """Scan for security vulnerabilities in IPC setup"""
+    
+    def __init__(self):
+        self.vulnerabilities = []
+    
+    def scan_directory(self, directory: str) -> List[Dict]:
+        """Scan directory for vulnerabilities"""
+        self.vulnerabilities = []
+        base_path = Path(directory)
+        
+        if not base_path.exists():
+            return []
+        
+        # Check base directory
+        self._check_directory_security(base_path)
+        
+        # Scan all entries
+        for entry in base_path.rglob("*"):
+            try:
+                self._check_path_security(entry)
+            except OSError as e:
+                self.vulnerabilities.append({
+                    'path': str(entry),
+                    'type': 'access_error',
+                    'severity': 'medium',
+                    'description': f"Cannot access: {e}"
+                })
+        
+        return self.vulnerabilities
+    
+    def _check_directory_security(self, path: Path):
+        """Check directory-specific security issues"""
+        stat_info = path.stat()
+        mode = stat_info.st_mode
+        
+        # Check for sticky bit on shared directories
+        if stat.S_IWOTH & mode and not stat.S_ISVTX & mode:
+            self.vulnerabilities.append({
+                'path': str(path),
+                'type': 'missing_sticky_bit',
+                'severity': 'high',
+                'description': 'World-writable directory without sticky bit'
+            })
+    
+    def _check_path_security(self, path: Path):
+        """Check general path security issues"""
+        stat_info = path.lstat()  # Don't follow symlinks
+        mode = stat_info.st_mode
+        
+        # Check for world-writable
+        if stat.S_IWOTH & mode:
+            self.vulnerabilities.append({
+                'path': str(path),
+                'type': 'world_writable',
+                'severity': 'high',
+                'description': f'World-writable permissions: {oct(stat.S_IMODE(mode))}'
+            })
+        
+        # Check for broken symlinks
+        if stat.S_ISLNK(mode):
+            if not path.exists():
+                self.vulnerabilities.append({
+                    'path': str(path),
+                    'type': 'broken_symlink',
+                    'severity': 'low',
+                    'description': 'Broken symbolic link'
+                })
+            else:
+                # Check symlink target
+                target = os.readlink(path)
+                if target.startswith('/'):
+                    self.vulnerabilities.append({
+                        'path': str(path),
+                        'type': 'absolute_symlink',
+                        'severity': 'medium',
+                        'description': f'Absolute symlink to: {target}'
+                    })
+        
+        # Check for setuid/setgid
+        if stat.S_ISUID & mode or stat.S_ISGID & mode:
+            self.vulnerabilities.append({
+                'path': str(path),
+                'type': 'setuid_setgid',
+                'severity': 'high',
+                'description': 'Setuid or setgid bit set'
+            })
+        
+        # Check for unusual permissions
+        if stat.S_ISREG(mode):
+            if mode & 0o111:  # Any execute bit
+                self.vulnerabilities.append({
+                    'path': str(path),
+                    'type': 'executable_data',
+                    'severity': 'medium',
+                    'description': 'Data file marked executable'
+                })
+    
+    def generate_report(self) -> str:
+        """Generate security report"""
+        if not self.vulnerabilities:
+            return "No vulnerabilities found."
+        
+        report = ["Security Vulnerability Report", "=" * 40, ""]
+        
+        # Group by severity
+        by_severity = {'high': [], 'medium': [], 'low': []}
+        for vuln in self.vulnerabilities:
+            by_severity[vuln['severity']].append(vuln)
+        
+        for severity in ['high', 'medium', 'low']:
+            if by_severity[severity]:
+                report.append(f"\n{severity.upper()} Severity Issues:")
+                report.append("-" * 30)
+                
+                for vuln in by_severity[severity]:
+                    report.append(f"\nPath: {vuln['path']}")
+                    report.append(f"Type: {vuln['type']}")
+                    report.append(f"Description: {vuln['description']}")
+        
+        return "\n".join(report)
+
+# Example usage
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) != 2:
+        print("Usage: vulnerability_scanner.py <directory>")
+        sys.exit(1)
+    
+    scanner = VulnerabilityScanner()
+    vulnerabilities = scanner.scan_directory(sys.argv[1])
+    
+    print(scanner.generate_report())
+    
+    # Exit with error if high severity issues found
+    if any(v['severity'] == 'high' for v in vulnerabilities):
+        sys.exit(1)
+#+end_src
+
+** Security Hardening Guide
+
+*** Checklist
+
+TODO: Create comprehensive security checklist
+- [ ] File creation with O_EXCL
+- [ ] Path validation and sanitization
+- [ ] Permission verification
+- [ ] Ownership checks
+- [ ] Symlink protection
+- [ ] Rate limiting
+- [ ] Audit logging
+- [ ] Privilege separation
+
+*** Best Practices
+
+1. **Always validate input**: Never trust user-provided paths
+2. **Use atomic operations**: Prevent TOCTOU races
+3. **Set restrictive permissions**: Start with minimal access
+4. **Check ownership**: Verify file ownership before use
+5. **Avoid predictable names**: Use random components in filenames
+6. **Clean up resources**: Remove temporary files on exit
+7. **Log security events**: Maintain audit trail
+8. **Test for vulnerabilities**: Regular security scanning
+
+** Next Steps
+
+Continue to [[file:08-historical-evolution.org][Chapter 8: Historical Evolution]] to understand how these patterns developed.
+
+* Exercises
+
+1. **Vulnerability Hunt**: Find and fix vulnerabilities in provided code
+2. **Secure Implementation**: Implement a secure message queue
+3. **Attack Simulation**: Create proof-of-concept exploits
+4. **Hardening Project**: Harden an existing IPC implementation

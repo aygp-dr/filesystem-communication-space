@@ -1,0 +1,638 @@
+#+TITLE: A Complete Catalog of Filesystem-Based IPC Primitives
+#+AUTHOR: AYGP-DR
+#+DATE: 2025-06-28
+#+OPTIONS: toc:2 num:t
+
+* A Taxonomy of Filesystem-Based Communication
+
+** Overview
+
+This chapter provides a comprehensive catalog of all mechanisms that enable inter-process communication through the filesystem namespace.
+
+#+begin_src mermaid :file diagrams/ipc-taxonomy.png :mkdirp yes
+graph TD
+    IPC[Filesystem IPC]
+    
+    IPC --> Persistent[Persistent]
+    IPC --> Ephemeral[Ephemeral]
+    
+    Persistent --> Files[Regular Files]
+    Persistent --> Dirs[Directories]
+    Persistent --> Symlinks[Symbolic Links]
+    
+    Ephemeral --> Pipes[Pipes]
+    Ephemeral --> Sockets[Unix Sockets]
+    Ephemeral --> SharedMem[Shared Memory]
+    
+    Files --> Locks[Lock Files]
+    Files --> Logs[Log Files]
+    Files --> Mailbox[Mailbox Files]
+    
+    Pipes --> Named[Named Pipes/FIFOs]
+    Pipes --> Anon[Anonymous Pipes]
+#+end_src
+
+** Classification Dimensions
+
+#+begin_src python :tangle core/primitive_taxonomy.py :mkdirp yes
+"""
+Classification system for filesystem IPC primitives.
+"""
+
+from enum import Enum, Flag, auto
+from dataclasses import dataclass
+from typing import List, Optional
+
+class Persistence(Enum):
+    """Lifetime of the communication channel"""
+    EPHEMERAL = auto()    # Exists only while in use
+    PERSISTENT = auto()   # Survives process termination
+    SEMI_PERSISTENT = auto()  # Survives but cleaned on reboot
+
+class Direction(Flag):
+    """Communication directionality"""
+    UNIDIRECTIONAL = auto()
+    BIDIRECTIONAL = auto()
+    BROADCAST = auto()
+    MULTICAST = auto()
+
+class Synchronization(Enum):
+    """Synchronization characteristics"""
+    BLOCKING = auto()      # Operations may block
+    NON_BLOCKING = auto()  # Operations never block
+    SELECTABLE = auto()    # Can use select/poll/epoll
+
+class Ordering(Enum):
+    """Message ordering guarantees"""
+    FIFO = auto()          # First in, first out
+    UNORDERED = auto()     # No ordering guarantee
+    PRIORITY = auto()      # Priority-based ordering
+    CAUSAL = auto()        # Causally ordered
+
+@dataclass
+class IPCPrimitive:
+    """Metadata for an IPC primitive"""
+    name: str
+    persistence: Persistence
+    direction: Direction
+    synchronization: Synchronization
+    ordering: Ordering
+    max_message_size: Optional[int]
+    kernel_buffering: bool
+    permissions_enforced: bool
+    
+    # TODO: Add more attributes
+    # - [ ] Performance characteristics
+    # - [ ] Platform availability
+    # - [ ] Security properties
+#+end_src
+
+** Persistent Primitives
+
+*** Regular Files
+
+The most basic form of filesystem IPC, using ordinary files for communication.
+
+#+begin_src python :tangle primitives/regular_files.py :mkdirp yes
+"""
+Regular files as IPC primitives.
+"""
+
+import os
+import fcntl
+import struct
+import time
+from pathlib import Path
+
+class FileBasedQueue:
+    """A simple file-based message queue"""
+    
+    def __init__(self, queue_file):
+        self.queue_file = Path(queue_file)
+        self.lock_file = self.queue_file.with_suffix('.lock')
+        
+    def send(self, message: bytes):
+        """Append a message to the queue"""
+        # Acquire exclusive lock
+        with open(self.lock_file, 'w') as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            
+            # Append message with length prefix
+            with open(self.queue_file, 'ab') as queue:
+                length = len(message)
+                queue.write(struct.pack('<I', length))
+                queue.write(message)
+                queue.flush()
+                os.fsync(queue.fileno())
+    
+    def receive(self) -> Optional[bytes]:
+        """Read and remove the first message"""
+        # TODO: Implement atomic read-and-truncate
+        # - [ ] Handle partial reads
+        # - [ ] Implement non-blocking mode
+        # - [ ] Add timeout support
+        pass
+
+class AppendOnlyLog:
+    """Append-only log for multi-writer scenarios"""
+    
+    def __init__(self, log_path):
+        self.log_path = Path(log_path)
+        
+    def append(self, entry: str):
+        """Atomically append an entry"""
+        # Use O_APPEND for atomic appends
+        with open(self.log_path, 'a') as log:
+            # Each write() with O_APPEND is atomic if size <= PIPE_BUF
+            timestamp = time.time()
+            pid = os.getpid()
+            line = f"{timestamp:.6f}:{pid}:{entry}\n"
+            if len(line.encode()) <= 512:  # Conservative PIPE_BUF
+                log.write(line)
+            else:
+                # TODO: Handle large entries
+                pass
+#+end_src
+
+*** Lock Files
+
+Using files as distributed locks and coordination primitives.
+
+#+begin_src python :tangle primitives/lock_files.py :mkdirp yes
+"""
+Lock files for process coordination.
+"""
+
+import os
+import fcntl
+import errno
+import signal
+from contextlib import contextmanager
+
+class PIDLockFile:
+    """Traditional PID-based lock file"""
+    
+    def __init__(self, lock_path):
+        self.lock_path = lock_path
+        
+    def acquire(self):
+        """Acquire lock by creating PID file"""
+        try:
+            # O_EXCL ensures atomic creation
+            fd = os.open(self.lock_path, 
+                        os.O_CREAT | os.O_EXCL | os.O_WRONLY, 
+                        0o644)
+            os.write(fd, f"{os.getpid()}\n".encode())
+            os.close(fd)
+            return True
+        except OSError as e:
+            if e.errno == errno.EEXIST:
+                # Check if holding process still exists
+                if self._check_stale():
+                    os.unlink(self.lock_path)
+                    return self.acquire()  # Retry
+            return False
+    
+    def _check_stale(self):
+        """Check if lock holder is still alive"""
+        try:
+            with open(self.lock_path) as f:
+                pid = int(f.read().strip())
+            # Check if process exists
+            os.kill(pid, 0)
+            return False  # Process exists
+        except (OSError, ValueError):
+            return True  # Stale lock
+
+class AdvisoryLock:
+    """POSIX advisory locking"""
+    
+    @contextmanager
+    def exclusive(self, file_path):
+        """Exclusive lock context manager"""
+        with open(file_path, 'r+') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                yield f
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    
+    # TODO: Implement additional locking patterns
+    # - [ ] Shared locks
+    # - [ ] Non-blocking locks
+    # - [ ] Byte-range locks
+#+end_src
+
+*** Directories as Communication Primitives
+
+#+begin_src python :tangle primitives/directory_ipc.py :mkdirp yes
+"""
+Using directories for IPC patterns.
+"""
+
+import os
+import time
+from pathlib import Path
+
+class DirectoryQueue:
+    """Queue implementation using directory entries"""
+    
+    def __init__(self, queue_dir):
+        self.queue_dir = Path(queue_dir)
+        self.queue_dir.mkdir(exist_ok=True)
+        
+    def enqueue(self, data: bytes):
+        """Add item to queue"""
+        # Timestamp ensures FIFO ordering when listing
+        timestamp = time.time_ns()
+        name = f"{timestamp}-{os.getpid()}.msg"
+        
+        # Atomic write via rename
+        tmp_path = self.queue_dir / f".tmp-{name}"
+        final_path = self.queue_dir / name
+        
+        tmp_path.write_bytes(data)
+        os.rename(tmp_path, final_path)
+        
+    def dequeue(self) -> Optional[bytes]:
+        """Remove and return oldest item"""
+        entries = sorted(self.queue_dir.glob("*.msg"))
+        if not entries:
+            return None
+            
+        # Try to claim ownership via rename
+        entry = entries[0]
+        claim_path = entry.with_suffix('.claimed')
+        
+        try:
+            os.rename(entry, claim_path)
+            # Successfully claimed
+            data = claim_path.read_bytes()
+            os.unlink(claim_path)
+            return data
+        except OSError:
+            # Another process got it first
+            return None
+
+class DirectoryBasedSet:
+    """Set operations using directory entries"""
+    
+    def __init__(self, set_dir):
+        self.set_dir = Path(set_dir)
+        self.set_dir.mkdir(exist_ok=True)
+        
+    def add(self, element: str):
+        """Add element to set"""
+        # Empty files as set members
+        (self.set_dir / element).touch()
+        
+    def remove(self, element: str):
+        """Remove element from set"""
+        try:
+            (self.set_dir / element).unlink()
+        except FileNotFoundError:
+            pass
+            
+    def contains(self, element: str) -> bool:
+        """Check membership"""
+        return (self.set_dir / element).exists()
+        
+    def members(self) -> List[str]:
+        """List all members"""
+        return [p.name for p in self.set_dir.iterdir()]
+#+end_src
+
+** Ephemeral Primitives
+
+*** Named Pipes (FIFOs)
+
+#+begin_src python :tangle primitives/named_pipes.py :mkdirp yes
+"""
+Named pipes (FIFOs) for IPC.
+"""
+
+import os
+import stat
+import select
+import errno
+from pathlib import Path
+
+class NamedPipe:
+    """Named pipe wrapper with common patterns"""
+    
+    def __init__(self, pipe_path):
+        self.pipe_path = Path(pipe_path)
+        
+    def create(self, mode=0o666):
+        """Create the named pipe"""
+        try:
+            os.mkfifo(self.pipe_path, mode)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+                
+    def write_message(self, message: bytes, timeout=None):
+        """Write a complete message"""
+        # Open in non-blocking mode
+        fd = os.open(self.pipe_path, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            if timeout:
+                # Use select for timeout
+                _, ready, _ = select.select([], [fd], [], timeout)
+                if not ready:
+                    raise TimeoutError("Write timeout")
+            
+            # Write atomically if possible
+            if len(message) <= 512:  # PIPE_BUF guarantee
+                os.write(fd, message)
+            else:
+                # TODO: Implement message framing for large messages
+                pass
+        finally:
+            os.close(fd)
+    
+    def read_message(self, max_size=4096, timeout=None):
+        """Read a complete message"""
+        # TODO: Implement reliable message reading
+        # - [ ] Handle partial reads
+        # - [ ] Implement message framing
+        # - [ ] Support non-blocking mode
+        pass
+
+class MultiReaderPipe:
+    """Pattern for multiple readers on a named pipe"""
+    
+    def __init__(self, pipe_path):
+        self.pipe = NamedPipe(pipe_path)
+        
+    def broadcast(self, message: bytes):
+        """Broadcast to all connected readers"""
+        # TODO: Implement tee-like functionality
+        # Note: True broadcast requires kernel support
+        pass
+#+end_src
+
+*** Unix Domain Sockets
+
+#+begin_src python :tangle primitives/unix_sockets.py :mkdirp yes
+"""
+Unix domain sockets as filesystem IPC.
+"""
+
+import socket
+import os
+import struct
+from pathlib import Path
+
+class UnixSocketServer:
+    """Unix domain socket server patterns"""
+    
+    def __init__(self, socket_path):
+        self.socket_path = Path(socket_path)
+        self.socket = None
+        
+    def start(self):
+        """Start the server"""
+        # Remove existing socket
+        try:
+            os.unlink(self.socket_path)
+        except OSError:
+            pass
+            
+        # Create and bind socket
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.socket.bind(str(self.socket_path))
+        self.socket.listen(5)
+        
+        # Set permissions
+        os.chmod(self.socket_path, 0o666)
+        
+    def accept_connection(self):
+        """Accept a client connection"""
+        client, _ = self.socket.accept()
+        return UnixSocketConnection(client)
+
+class UnixSocketConnection:
+    """Handle a Unix socket connection"""
+    
+    def __init__(self, socket):
+        self.socket = socket
+        
+    def send_fd(self, fd, message=b""):
+        """Send a file descriptor over the socket"""
+        # TODO: Implement SCM_RIGHTS fd passing
+        # - [ ] Use sendmsg with ancillary data
+        # - [ ] Handle multiple FDs
+        # - [ ] Error handling
+        pass
+        
+    def recv_fd(self):
+        """Receive a file descriptor"""
+        # TODO: Implement SCM_RIGHTS fd receiving
+        pass
+
+class DatagramSocket:
+    """Unix domain datagram socket patterns"""
+    
+    def __init__(self, socket_path):
+        self.socket_path = Path(socket_path)
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        
+    # TODO: Implement datagram patterns
+    # - [ ] Reliable datagram delivery
+    # - [ ] Multicast emulation
+    # - [ ] Message boundaries
+#+end_src
+
+*** Shared Memory Files
+
+#+begin_src python :tangle primitives/shared_memory.py :mkdirp yes
+"""
+Shared memory via filesystem.
+"""
+
+import mmap
+import os
+import struct
+from pathlib import Path
+
+class SharedMemoryFile:
+    """Shared memory backed by a file"""
+    
+    def __init__(self, shm_path, size=4096):
+        self.shm_path = Path(shm_path)
+        self.size = size
+        self.mmap = None
+        self.fd = None
+        
+    def create(self):
+        """Create and initialize shared memory"""
+        self.fd = os.open(self.shm_path, 
+                         os.O_CREAT | os.O_RDWR, 
+                         0o666)
+        
+        # Ensure file is correct size
+        os.ftruncate(self.fd, self.size)
+        
+        # Memory map the file
+        self.mmap = mmap.mmap(self.fd, self.size)
+        
+    def write(self, offset, data: bytes):
+        """Write data at offset"""
+        self.mmap[offset:offset+len(data)] = data
+        
+    def read(self, offset, length) -> bytes:
+        """Read data from offset"""
+        return self.mmap[offset:offset+length]
+        
+    # TODO: Implement synchronization
+    # - [ ] Atomic operations
+    # - [ ] Memory barriers
+    # - [ ] Lock-free data structures
+
+class SharedMemoryQueue:
+    """Lock-free queue in shared memory"""
+    
+    def __init__(self, shm_file):
+        self.shm = shm_file
+        # TODO: Implement circular buffer
+        # - [ ] Atomic head/tail pointers
+        # - [ ] Memory ordering guarantees
+        # - [ ] ABA problem prevention
+        pass
+#+end_src
+
+** Special Filesystem Features
+
+*** Mandatory Locking
+
+TODO: Document mandatory locking where available
+- [ ] System V mandatory locks
+- [ ] mount -o mand requirements
+- [ ] Security implications
+
+*** Extended Attributes
+
+#+begin_src python :tangle primitives/extended_attributes.py :mkdirp yes
+"""
+Using extended attributes for IPC.
+"""
+
+import os
+import xattr  # Requires pyxattr
+
+class XattrChannel:
+    """Communication via extended attributes"""
+    
+    def __init__(self, file_path):
+        self.file_path = file_path
+        
+    def send(self, channel: str, message: bytes):
+        """Send message via xattr"""
+        # Namespace for our IPC
+        attr_name = f"user.ipc.{channel}"
+        
+        # Extended attributes have size limits
+        if len(message) > 65536:  # Typical limit
+            raise ValueError("Message too large")
+            
+        xattr.setxattr(self.file_path, attr_name, message)
+        
+    def receive(self, channel: str) -> bytes:
+        """Receive message from xattr"""
+        attr_name = f"user.ipc.{channel}"
+        try:
+            return xattr.getxattr(self.file_path, attr_name)
+        except OSError:
+            return None
+    
+    # TODO: Explore xattr capabilities
+    # - [ ] Atomic compare-and-swap
+    # - [ ] Watch for changes
+    # - [ ] Security labels
+#+end_src
+
+*** /proc and /sys Interfaces
+
+TODO: Document kernel-provided IPC via pseudo-filesystems
+- [ ] /proc/PID/fd for file descriptor introspection
+- [ ] /sys event interfaces
+- [ ] /proc/sys/kernel parameters
+
+** Performance Characteristics
+
+#+begin_src python :tangle benchmarks/primitive_benchmarks.py :mkdirp yes
+"""
+Benchmark different IPC primitives.
+"""
+
+import time
+import os
+from typing import Dict, Callable
+
+class IPCBenchmark:
+    """Benchmark framework for IPC primitives"""
+    
+    def __init__(self):
+        self.results = {}
+        
+    def benchmark_throughput(self, 
+                           primitive_name: str,
+                           setup: Callable,
+                           send: Callable,
+                           receive: Callable,
+                           message_size: int = 1024,
+                           iterations: int = 10000):
+        """Measure throughput of an IPC primitive"""
+        # TODO: Implement comprehensive benchmarks
+        # - [ ] Latency measurements
+        # - [ ] Throughput tests
+        # - [ ] Scalability with multiple clients
+        # - [ ] CPU usage profiling
+        pass
+        
+    def compare_primitives(self):
+        """Generate comparison report"""
+        # TODO: Create comparison matrix
+        # - [ ] Feature comparison
+        # - [ ] Performance metrics
+        # - [ ] Use case recommendations
+        pass
+#+end_src
+
+** Security Analysis
+
+TODO: Security implications of each primitive
+- [ ] Permission models
+- [ ] Race conditions
+- [ ] Denial of service vectors
+- [ ] Information leakage
+
+** Platform Variations
+
+TODO: Document platform-specific differences
+- [ ] Linux-specific features
+- [ ] BSD variations
+- [ ] macOS peculiarities
+- [ ] Filesystem-specific behavior
+
+** Next Steps
+
+Continue to [[file:03-patterns-and-idioms.org][Chapter 3: Patterns and Idioms]] to explore common patterns that emerge across these primitives.
+
+* Quick Reference Card
+
+| Primitive | Persistence | Direction | Buffer | Ordering | Use Case |
+|-----------|-------------|-----------|---------|----------|----------|
+| Regular Files | Persistent | Any | Unlimited | App-defined | Logs, configs |
+| FIFOs | Ephemeral | Uni | Kernel | FIFO | Stream data |
+| Unix Sockets | Ephemeral | Bi | Kernel | FIFO | RPC, FD passing |
+| Lock Files | Persistent | N/A | N/A | N/A | Mutual exclusion |
+| Shared Memory | Persistent | Any | User | None | High-performance |
+| Directories | Persistent | Any | FS | FS-defined | Sets, queues |
+
+* Exercises
+
+1. **Primitive Comparison**: Implement the same message queue using three different primitives and compare performance
+2. **Hybrid Approach**: Combine multiple primitives to create a robust IPC mechanism
+3. **Error Recovery**: Implement automatic recovery from crashes for each primitive type

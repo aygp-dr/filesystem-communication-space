@@ -1,0 +1,334 @@
+#+TITLE: The Namespace as Rendezvous: Meeting Points in the Filesystem
+#+AUTHOR: AYGP-DR
+#+DATE: 2025-06-28
+#+OPTIONS: toc:2 num:t
+
+* The Filesystem as Meeting Point
+
+** Conceptual Framework
+
+The filesystem namespace serves as a distributed agreement mechanism where independent processes can discover each other and establish communication channels.
+
+#+begin_src python :tangle core/rendezvous.py :mkdirp yes
+"""
+Rendezvous patterns in filesystem-based communication.
+
+The filesystem provides a persistent, hierarchical namespace that
+processes can use to find each other without prior coordination.
+"""
+
+import os
+import time
+import json
+from pathlib import Path
+from abc import ABC, abstractmethod
+
+class RendezvousPoint(ABC):
+    """Abstract base for filesystem rendezvous mechanisms"""
+    
+    def __init__(self, namespace_path):
+        self.namespace = Path(namespace_path)
+        self.namespace.mkdir(parents=True, exist_ok=True)
+    
+    @abstractmethod
+    def announce(self, service_name, metadata):
+        """Announce availability at this rendezvous point"""
+        pass
+    
+    @abstractmethod
+    def discover(self, service_pattern):
+        """Discover services at this rendezvous point"""
+        pass
+    
+    @abstractmethod
+    def establish_channel(self, peer):
+        """Establish communication channel with discovered peer"""
+        pass
+#+end_src
+
+** Well-Known Locations
+
+*** System Standard Paths
+
+#+begin_src python :tangle core/well_known_paths.py :mkdirp yes
+"""
+Standard filesystem locations used for process rendezvous.
+"""
+
+import platform
+from pathlib import Path
+
+class WellKnownPaths:
+    """Platform-specific well-known rendezvous locations"""
+    
+    def __init__(self):
+        self.system = platform.system()
+        
+    @property
+    def runtime_dir(self):
+        """Runtime data directory (cleared on reboot)"""
+        if self.system == "Linux":
+            # Try XDG_RUNTIME_DIR first
+            xdg_runtime = os.environ.get('XDG_RUNTIME_DIR')
+            if xdg_runtime:
+                return Path(xdg_runtime)
+            return Path("/run")
+        elif self.system == "Darwin":
+            return Path("/var/run")
+        else:
+            return Path("/tmp")
+    
+    @property
+    def socket_dir(self):
+        """Standard directory for Unix domain sockets"""
+        # TODO: Implement platform-specific socket directories
+        # - [ ] Linux: /run, /tmp, /var/run
+        # - [ ] BSD: /var/run
+        # - [ ] macOS: /private/tmp
+        pass
+    
+    @property
+    def lock_dir(self):
+        """Standard directory for lock files"""
+        # TODO: Implement lock directory detection
+        pass
+#+end_src
+
+*** Application Conventions
+
+TODO: Document common application rendezvous patterns
+- [ ] DBus session and system buses
+- [ ] X11 display sockets
+- [ ] Docker/container socket locations
+- [ ] Systemd socket activation paths
+
+** Discovery Protocols
+
+*** Static Discovery
+
+Processes agree on fixed paths beforehand.
+
+#+begin_src python :tangle patterns/static_discovery.py :mkdirp yes
+"""
+Static discovery: Using predetermined paths for rendezvous.
+"""
+
+class StaticRendezvous:
+    """Simple static path-based rendezvous"""
+    
+    def __init__(self, base_path="/tmp/services"):
+        self.base = Path(base_path)
+        self.base.mkdir(exist_ok=True)
+    
+    def register_service(self, name, socket_path):
+        """Register a service at a well-known location"""
+        service_file = self.base / f"{name}.service"
+        
+        # Atomic write of service information
+        tmp_file = service_file.with_suffix('.tmp')
+        with open(tmp_file, 'w') as f:
+            json.dump({
+                'socket': str(socket_path),
+                'pid': os.getpid(),
+                'started': time.time()
+            }, f)
+        
+        # Atomic rename to publish
+        os.rename(tmp_file, service_file)
+        
+    def find_service(self, name):
+        """Find a service by name"""
+        service_file = self.base / f"{name}.service"
+        if service_file.exists():
+            with open(service_file) as f:
+                return json.load(f)
+        return None
+#+end_src
+
+*** Dynamic Discovery
+
+Processes discover each other through filesystem scanning or events.
+
+#+begin_src mermaid :file diagrams/dynamic-discovery-flow.png :mkdirp yes
+sequenceDiagram
+    participant Service
+    participant Filesystem
+    participant Client
+    participant Inotify
+    
+    Service->>Filesystem: Create service.announce
+    Filesystem->>Inotify: IN_CREATE event
+    Inotify->>Client: Notify new service
+    Client->>Filesystem: Read service.announce
+    Client->>Service: Connect to advertised endpoint
+#+end_src
+
+TODO: Implement dynamic discovery patterns
+- [ ] Directory scanning protocols
+- [ ] Inotify-based discovery
+- [ ] Timestamp-based freshness checking
+- [ ] Heartbeat files for liveness
+
+** Coordination Patterns
+
+*** Lock-Based Coordination
+
+#+begin_src python :tangle patterns/lock_coordination.py :mkdirp yes
+"""
+Using filesystem locks for process coordination at rendezvous.
+"""
+
+import fcntl
+import errno
+
+class LockCoordinator:
+    """Coordinate access to rendezvous points using locks"""
+    
+    def __init__(self, coordination_dir="/tmp/coord"):
+        self.coord_dir = Path(coordination_dir)
+        self.coord_dir.mkdir(exist_ok=True)
+    
+    def acquire_role(self, role_name, exclusive=True):
+        """Acquire a named role using filesystem locking"""
+        lock_file = self.coord_dir / f"{role_name}.lock"
+        
+        # TODO: Implement role acquisition
+        # - [ ] Use flock() for advisory locking
+        # - [ ] Handle both exclusive and shared roles
+        # - [ ] Implement timeout and retry logic
+        pass
+    
+    def coordinate_startup(self, service_group):
+        """Coordinate startup order within a service group"""
+        # TODO: Implement startup coordination
+        # - [ ] Define startup dependencies
+        # - [ ] Use lock ordering to prevent deadlocks
+        # - [ ] Signal readiness through lock release
+        pass
+#+end_src
+
+*** Election Algorithms
+
+TODO: Implement leader election using filesystem primitives
+- [ ] Lowest timestamp wins
+- [ ] Atomic directory entry creation
+- [ ] Handling split-brain scenarios
+
+** Security Considerations
+
+*** Permission-Based Access Control
+
+#+begin_src python :tangle security/permission_rendezvous.py :mkdirp yes
+"""
+Security considerations for filesystem rendezvous points.
+"""
+
+import stat
+import pwd
+import grp
+
+class SecureRendezvous:
+    """Rendezvous with permission-based access control"""
+    
+    def __init__(self, base_path, group_name=None):
+        self.base = Path(base_path)
+        self.group_name = group_name
+        
+    def create_secure_directory(self, name, mode=0o750):
+        """Create a directory with specific permissions"""
+        path = self.base / name
+        path.mkdir(mode=mode, exist_ok=True)
+        
+        # Set group if specified
+        if self.group_name:
+            gid = grp.getgrnam(self.group_name).gr_gid
+            os.chown(path, -1, gid)
+            
+        # TODO: Implement additional security measures
+        # - [ ] Set sticky bit for shared directories
+        # - [ ] Verify ownership before operations
+        # - [ ] Implement ACLs where available
+        
+        return path
+#+end_src
+
+*** Race Condition Mitigation
+
+TODO: Document and prevent common race conditions
+- [ ] TOCTOU in service discovery
+- [ ] PID recycling issues
+- [ ] Symlink attacks on rendezvous points
+
+** Case Studies
+
+*** DBus Session Bus
+
+TODO: Analyze DBus session bus rendezvous
+- [ ] Socket path determination
+- [ ] Environment variable propagation
+- [ ] Authentication cookie handling
+
+*** Docker Socket
+
+TODO: Examine Docker daemon socket rendezvous
+- [ ] Standard socket locations
+- [ ] Permission models
+- [ ] Socket activation integration
+
+** Performance Implications
+
+#+begin_src python :tangle benchmarks/rendezvous_performance.py :mkdirp yes
+"""
+Benchmark different rendezvous mechanisms.
+"""
+
+import time
+import multiprocessing
+
+def benchmark_discovery_methods():
+    """Compare performance of different discovery methods"""
+    methods = {
+        'static_path': benchmark_static_discovery,
+        'directory_scan': benchmark_directory_scan,
+        'inotify_watch': benchmark_inotify_discovery,
+    }
+    
+    # TODO: Implement benchmarks
+    # - [ ] Measure discovery latency
+    # - [ ] Test with varying numbers of services
+    # - [ ] Compare CPU and I/O usage
+    pass
+#+end_src
+
+** Advanced Topics
+
+*** Namespace Isolation
+
+TODO: Explore rendezvous in containerized environments
+- [ ] Mount namespaces and visibility
+- [ ] Bind mounts for cross-namespace rendezvous
+- [ ] Abstract namespace sockets
+
+*** Network Filesystem Considerations
+
+TODO: Analyze rendezvous over network filesystems
+- [ ] NFS locking semantics
+- [ ] Cache coherency issues
+- [ ] Timeout and retry strategies
+
+** Next Steps
+
+Continue to [[file:02-primitives-catalog.org][Chapter 2: Primitives Catalog]] for a comprehensive catalog of filesystem-based IPC mechanisms.
+
+* Exercises
+
+1. **Basic Rendezvous**: Implement a simple service discovery system using only directories and files
+2. **Secure Channels**: Create a rendezvous system that ensures only authorized processes can connect
+3. **Fault Tolerance**: Design a rendezvous mechanism that handles process crashes gracefully
+
+* References
+
+TODO: Add references
+- [ ] Unix Network Programming (Stevens)
+- [ ] The Linux Programming Interface (Kerrisk)
+- [ ] Research papers on distributed coordination

@@ -1,0 +1,683 @@
+#+TITLE: Case Studies: Real-World Filesystem IPC
+#+AUTHOR: AYGP-DR
+#+DATE: 2025-06-28
+#+OPTIONS: toc:2 num:t
+
+* Real-World Systems Analysis
+
+** Overview
+
+This chapter examines how real-world systems use filesystem-based IPC, analyzing their design decisions, trade-offs, and lessons learned.
+
+** Case Study 1: Git - Distributed Version Control
+
+*** Architecture Overview
+
+Git uses the filesystem extensively for both storage and communication between processes.
+
+#+begin_src mermaid :file diagrams/git-filesystem-ipc.png :mkdirp yes
+graph TD
+    WD[Working Directory]
+    IDX[.git/index]
+    ODB[.git/objects]
+    REFS[.git/refs]
+    HOOKS[.git/hooks]
+    
+    WD -->|git add| IDX
+    IDX -->|git commit| ODB
+    ODB -->|update| REFS
+    HOOKS -->|trigger| EXT[External Processes]
+    
+    subgraph "Lock Files"
+        IDXLOCK[.git/index.lock]
+        REFLOCK[.git/refs/*.lock]
+    end
+#+end_src
+
+*** IPC Mechanisms in Git
+
+#+begin_src python :tangle case_studies/git_patterns.py :mkdirp yes
+"""
+Git's filesystem IPC patterns.
+"""
+
+import os
+import hashlib
+import zlib
+from pathlib import Path
+
+class GitLockFile:
+    """Git's lock file implementation pattern"""
+    
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock_path = self.path.with_suffix(self.path.suffix + '.lock')
+        self.fd = None
+    
+    def acquire(self):
+        """Acquire lock atomically"""
+        try:
+            # O_EXCL ensures only one process gets the lock
+            self.fd = os.open(self.lock_path, 
+                            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                            0o666)
+            return True
+        except OSError:
+            return False
+    
+    def write_and_commit(self, data: bytes):
+        """Write data and atomically replace original"""
+        if self.fd is None:
+            raise RuntimeError("Lock not held")
+        
+        # Write to lock file
+        os.write(self.fd, data)
+        os.fsync(self.fd)
+        os.close(self.fd)
+        self.fd = None
+        
+        # Atomic rename
+        os.rename(self.lock_path, self.path)
+    
+    def release(self):
+        """Release lock without committing"""
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        
+        try:
+            os.unlink(self.lock_path)
+        except OSError:
+            pass
+
+class GitObjectStore:
+    """Git's content-addressable object store"""
+    
+    def __init__(self, git_dir):
+        self.objects_dir = Path(git_dir) / "objects"
+        self.objects_dir.mkdir(exist_ok=True)
+    
+    def write_object(self, data: bytes, obj_type: str) -> str:
+        """Write object using Git's storage format"""
+        # Create header
+        header = f"{obj_type} {len(data)}\0".encode()
+        full_data = header + data
+        
+        # Calculate SHA-1
+        sha = hashlib.sha1(full_data).hexdigest()
+        
+        # Determine path (first 2 chars as directory)
+        obj_dir = self.objects_dir / sha[:2]
+        obj_path = obj_dir / sha[2:]
+        
+        # Skip if already exists (content-addressable)
+        if obj_path.exists():
+            return sha
+        
+        # Create directory if needed
+        obj_dir.mkdir(exist_ok=True)
+        
+        # Write compressed data atomically
+        compressed = zlib.compress(full_data)
+        tmp_path = obj_path.with_suffix('.tmp')
+        
+        tmp_path.write_bytes(compressed)
+        os.rename(tmp_path, obj_path)
+        
+        return sha
+
+# TODO: Analyze more Git IPC patterns
+# - [ ] Reference updates with reflogs
+# - [ ] Pack file negotiation
+# - [ ] Hook execution protocol
+# - [ ] Worktree communication
+#+end_src
+
+*** Lessons from Git
+
+1. **Lock files everywhere**: Git uses `.lock` files for almost all updates
+2. **Content addressing**: Using SHA-1 as filenames eliminates naming conflicts
+3. **Atomic updates**: Every update is atomic via rename
+4. **No daemon required**: All IPC through filesystem
+
+** Case Study 2: Postfix - Mail Transfer Agent
+
+*** Architecture Overview
+
+Postfix uses a queue-based architecture with different processes handling different stages.
+
+#+begin_src mermaid :file diagrams/postfix-queue-architecture.png :mkdirp yes
+graph LR
+    SMTP[SMTP Server] -->|write| INCOMING[incoming/]
+    INCOMING -->|move| ACTIVE[active/]
+    ACTIVE -->|process| DELIVERY[Delivery Agent]
+    DELIVERY -->|move| DEFERRED[deferred/]
+    
+    subgraph "Queue Directories"
+        INCOMING
+        ACTIVE
+        DEFERRED
+        CORRUPT[corrupt/]
+    end
+#+end_src
+
+*** Queue Management Patterns
+
+#+begin_src python :tangle case_studies/postfix_patterns.py :mkdirp yes
+"""
+Postfix-style mail queue patterns.
+"""
+
+import os
+import time
+import hashlib
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class QueueMessage:
+    """Message in mail queue"""
+    id: str
+    sender: str
+    recipients: list
+    data: bytes
+    queued_time: float
+    attempts: int = 0
+
+class MailQueue:
+    """Postfix-style queue management"""
+    
+    def __init__(self, spool_dir):
+        self.spool = Path(spool_dir)
+        
+        # Queue directories
+        self.incoming = self.spool / "incoming"
+        self.active = self.spool / "active"  
+        self.deferred = self.spool / "deferred"
+        self.corrupt = self.spool / "corrupt"
+        
+        # Create all directories
+        for d in [self.incoming, self.active, 
+                 self.deferred, self.corrupt]:
+            d.mkdir(parents=True, exist_ok=True)
+    
+    def submit(self, message: QueueMessage) -> str:
+        """Submit message to queue"""
+        # Generate unique ID
+        msg_id = self._generate_id(message)
+        message.id = msg_id
+        
+        # Write to incoming atomically
+        temp_path = self.incoming / f".tmp.{msg_id}"
+        final_path = self.incoming / msg_id
+        
+        self._write_message(temp_path, message)
+        os.rename(temp_path, final_path)
+        
+        return msg_id
+    
+    def activate(self) -> Optional[QueueMessage]:
+        """Move message from incoming to active"""
+        for entry in self.incoming.iterdir():
+            if entry.name.startswith('.'):
+                continue
+            
+            active_path = self.active / entry.name
+            
+            try:
+                # Atomic move to active
+                os.rename(entry, active_path)
+                
+                # Load and return message
+                return self._read_message(active_path)
+            except OSError:
+                # Another process got it
+                continue
+        
+        return None
+    
+    def defer(self, msg_id: str, reason: str):
+        """Move message to deferred queue"""
+        active_path = self.active / msg_id
+        deferred_path = self.deferred / msg_id
+        
+        try:
+            # Add deferral metadata
+            message = self._read_message(active_path)
+            message.attempts += 1
+            
+            # Write to deferred
+            self._write_message(deferred_path, message)
+            
+            # Remove from active
+            os.unlink(active_path)
+        except OSError:
+            pass
+    
+    def _generate_id(self, message: QueueMessage) -> str:
+        """Generate unique message ID"""
+        # Postfix uses microsecond timestamp + inode
+        # We'll use timestamp + hash
+        timestamp = int(time.time() * 1000000)
+        content_hash = hashlib.md5(message.data).hexdigest()[:8]
+        return f"{timestamp}.{content_hash}"
+    
+    # TODO: Implement queue runner patterns
+    # - [ ] Exponential backoff for deferred
+    # - [ ] Queue file format (Postfix uses specific format)
+    # - [ ] Parallel delivery
+    # - [ ] Queue manager coordination
+
+class PostfixLocking:
+    """Postfix's locking strategies"""
+    
+    @staticmethod
+    def deliver_with_dotlock(mailbox_path: str, message: bytes):
+        """Deliver using traditional dotlock"""
+        lock_path = f"{mailbox_path}.lock"
+        
+        # Try to acquire lock with timeout
+        for attempt in range(30):  # 30 second timeout
+            try:
+                fd = os.open(lock_path,
+                           os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                           0o666)
+                os.close(fd)
+                break
+            except OSError:
+                time.sleep(1)
+        else:
+            raise TimeoutError("Could not acquire mailbox lock")
+        
+        try:
+            # Append to mailbox
+            with open(mailbox_path, 'ab') as mbox:
+                mbox.write(message)
+                mbox.flush()
+                os.fsync(mbox.fileno())
+        finally:
+            # Release lock
+            os.unlink(lock_path)
+#+end_src
+
+*** Lessons from Postfix
+
+1. **Queue isolation**: Different directories for different states
+2. **No database needed**: Filesystem provides persistence and atomicity
+3. **Crash recovery**: Queue design allows easy recovery
+4. **Scalability**: Multiple processes can work on queue concurrently
+
+** Case Study 3: Systemd - Init System
+
+*** Socket Activation
+
+Systemd's socket activation uses filesystem sockets for service activation.
+
+#+begin_src python :tangle case_studies/systemd_patterns.py :mkdirp yes
+"""
+Systemd-style socket activation patterns.
+"""
+
+import os
+import socket
+import struct
+from pathlib import Path
+
+class SocketActivation:
+    """Systemd-style socket activation"""
+    
+    @staticmethod
+    def listen_fds() -> list:
+        """Get file descriptors passed by systemd"""
+        # Check if we're socket activated
+        pid = os.environ.get('LISTEN_PID')
+        if not pid or int(pid) != os.getpid():
+            return []
+        
+        # Get number of FDs
+        n_fds = int(os.environ.get('LISTEN_FDS', 0))
+        if n_fds == 0:
+            return []
+        
+        # FDs start at 3 (after stdin/stdout/stderr)
+        SD_LISTEN_FDS_START = 3
+        fds = []
+        
+        for i in range(n_fds):
+            fd = SD_LISTEN_FDS_START + i
+            # Set close-on-exec flag
+            flags = fcntl.fcntl(fd, fcntl.F_GETFD)
+            fcntl.fcntl(fd, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)
+            fds.append(fd)
+        
+        return fds
+    
+    @staticmethod
+    def notify_ready():
+        """Notify systemd that service is ready"""
+        notify_socket = os.environ.get('NOTIFY_SOCKET')
+        if not notify_socket:
+            return
+        
+        # Create unix socket
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        
+        # Send ready notification
+        sock.sendto(b'READY=1', notify_socket)
+        sock.close()
+
+class SystemdJournal:
+    """Systemd journal socket communication"""
+    
+    def __init__(self):
+        self.socket_path = "/run/systemd/journal/socket"
+        self.sock = None
+        
+    def connect(self):
+        """Connect to journal socket"""
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        # Journal socket is datagram, no connect needed
+        
+    def log(self, priority: int, message: str, **fields):
+        """Send structured log to journal"""
+        if not self.sock:
+            self.connect()
+        
+        # Format: FIELD=value\n...
+        parts = [f"PRIORITY={priority}", f"MESSAGE={message}"]
+        
+        for key, value in fields.items():
+            key = key.upper().replace('-', '_')
+            parts.append(f"{key}={value}")
+        
+        data = '\n'.join(parts).encode('utf-8')
+        
+        # Send to journal
+        self.sock.sendto(data, self.socket_path)
+
+# TODO: Analyze more systemd patterns
+# - [ ] D-Bus activation
+# - [ ] Cgroup filesystem interface
+# - [ ] Runtime directory management
+# - [ ] Unit file drop-ins
+#+end_src
+
+*** Lessons from Systemd
+
+1. **Socket activation**: Services don't need to manage their own sockets
+2. **Notification protocol**: Simple datagram protocol for service readiness
+3. **Structured logging**: Using sockets for structured log transport
+4. **Filesystem as API**: Heavy use of /sys and /proc interfaces
+
+** Case Study 4: Docker - Container Runtime
+
+*** Container Coordination
+
+#+begin_src python :tangle case_studies/docker_patterns.py :mkdirp yes
+"""
+Docker's filesystem IPC patterns.
+"""
+
+import json
+import os
+from pathlib import Path
+
+class DockerVolumePlugin:
+    """Docker volume plugin socket protocol"""
+    
+    def __init__(self, plugin_name):
+        self.plugin_name = plugin_name
+        self.socket_path = Path(f"/run/docker/plugins/{plugin_name}.sock")
+        
+    def register(self):
+        """Register plugin with Docker"""
+        # Create plugin directory
+        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write plugin manifest
+        manifest = {
+            "Name": self.plugin_name,
+            "Addr": f"unix://{self.socket_path}",
+            "TLSConfig": None
+        }
+        
+        spec_path = self.socket_path.with_suffix('.spec')
+        with open(spec_path, 'w') as f:
+            json.dump(manifest, f)
+
+class ContainerRuntime:
+    """Container runtime filesystem patterns"""
+    
+    def __init__(self, runtime_dir="/var/run/containers"):
+        self.runtime_dir = Path(runtime_dir)
+        self.runtime_dir.mkdir(exist_ok=True)
+        
+    def create_container_dirs(self, container_id: str):
+        """Create container runtime directories"""
+        container_dir = self.runtime_dir / container_id
+        
+        # Standard directories
+        dirs = {
+            'rootfs': container_dir / 'rootfs',
+            'config': container_dir / 'config',
+            'runtime': container_dir / 'runtime',
+            'secrets': container_dir / 'secrets',
+            'shm': container_dir / 'shm'  # Shared memory
+        }
+        
+        for name, path in dirs.items():
+            path.mkdir(parents=True, exist_ok=True)
+            
+            # Special handling for shm
+            if name == 'shm':
+                # Mount tmpfs for shared memory
+                os.system(f"mount -t tmpfs -o size=64m tmpfs {path}")
+        
+        return dirs
+    
+    def write_container_state(self, container_id: str, state: dict):
+        """Atomically update container state"""
+        state_file = self.runtime_dir / container_id / "state.json"
+        
+        # Atomic write
+        tmp_file = state_file.with_suffix('.tmp')
+        with open(tmp_file, 'w') as f:
+            json.dump(state, f, indent=2)
+        
+        os.rename(tmp_file, state_file)
+
+# TODO: More Docker patterns
+# - [ ] Container stdio handling
+# - [ ] Layer storage coordination
+# - [ ] Network namespace setup
+# - [ ] Volume mount propagation
+#+end_src
+
+*** Lessons from Docker
+
+1. **Plugin discovery**: Using well-known socket locations
+2. **Atomic state updates**: JSON files with atomic replacement
+3. **Filesystem isolation**: Using mount namespaces effectively
+4. **Runtime directories**: Structured directory layout for container data
+
+** Case Study 5: Apache Web Server
+
+*** Scoreboard and Shared Memory
+
+#+begin_src python :tangle case_studies/apache_patterns.py :mkdirp yes
+"""
+Apache's IPC patterns for process coordination.
+"""
+
+import mmap
+import struct
+import os
+from enum import IntEnum
+from pathlib import Path
+
+class WorkerStatus(IntEnum):
+    """Apache worker states"""
+    DEAD = 0
+    STARTING = 1
+    READY = 2
+    BUSY_READ = 3
+    BUSY_WRITE = 4
+    BUSY_KEEPALIVE = 5
+    BUSY_LOG = 6
+    BUSY_DNS = 7
+    CLOSING = 8
+    GRACEFUL = 9
+
+class ApacheScoreboard:
+    """Apache-style scoreboard for worker coordination"""
+    
+    # Scoreboard entry format
+    ENTRY_FORMAT = "=BIIQQLLf"  # status, pid, tid, requests, bytes, times...
+    ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)
+    
+    def __init__(self, scoreboard_file, max_workers=150):
+        self.file = Path(scoreboard_file)
+        self.max_workers = max_workers
+        self.fd = None
+        self.mmap = None
+        
+    def create(self):
+        """Create scoreboard file"""
+        size = self.ENTRY_SIZE * self.max_workers
+        
+        # Create and size file
+        self.fd = os.open(self.file, os.O_CREAT | os.O_RDWR, 0o666)
+        os.ftruncate(self.fd, size)
+        
+        # Memory map
+        self.mmap = mmap.mmap(self.fd, size)
+        
+        # Initialize all slots as DEAD
+        for i in range(self.max_workers):
+            self.update_worker(i, WorkerStatus.DEAD, 0)
+    
+    def update_worker(self, slot: int, status: WorkerStatus, pid: int):
+        """Update worker status atomically"""
+        if slot >= self.max_workers:
+            raise ValueError("Invalid slot")
+        
+        offset = slot * self.ENTRY_SIZE
+        
+        # Read current data
+        self.mmap.seek(offset)
+        current = self.mmap.read(self.ENTRY_SIZE)
+        data = list(struct.unpack(self.ENTRY_FORMAT, current))
+        
+        # Update status and pid
+        data[0] = status
+        data[1] = pid
+        
+        # Write back
+        self.mmap.seek(offset)
+        self.mmap.write(struct.pack(self.ENTRY_FORMAT, *data))
+        
+        # Ensure visibility
+        self.mmap.flush()
+    
+    def get_worker_status(self, slot: int) -> tuple:
+        """Read worker status"""
+        offset = slot * self.ENTRY_SIZE
+        self.mmap.seek(offset)
+        data = self.mmap.read(self.ENTRY_SIZE)
+        return struct.unpack(self.ENTRY_FORMAT, data)
+
+class ApacheMutex:
+    """Apache's file-based mutex patterns"""
+    
+    def __init__(self, mutex_dir):
+        self.mutex_dir = Path(mutex_dir)
+        self.mutex_dir.mkdir(exist_ok=True)
+        
+    def create_accept_mutex(self):
+        """Create accept mutex for worker coordination"""
+        # Apache uses various mutex mechanisms
+        # File-based for maximum portability
+        mutex_file = self.mutex_dir / "accept.mutex"
+        
+        # Create with specific permissions
+        fd = os.open(mutex_file, os.O_CREAT | os.O_RDWR, 0o600)
+        os.close(fd)
+        
+        return mutex_file
+
+# TODO: More Apache patterns
+# - [ ] Graceful restart coordination
+# - [ ] Log rotation signals
+# - [ ] Module shared memory
+# - [ ] Per-child config
+#+end_src
+
+*** Lessons from Apache
+
+1. **Shared memory scoreboard**: Efficient worker status sharing
+2. **File-based mutexes**: Portable synchronization
+3. **Graceful operations**: Coordinating without service interruption
+4. **Memory-mapped files**: High-performance IPC
+
+** Comparative Analysis
+
+*** Design Patterns Across Systems
+
+| System | Primary IPC | Key Pattern | Design Philosophy |
+|--------|-------------|-------------|-------------------|
+| Git | Lock files | Atomic rename | No daemon needed |
+| Postfix | Queue dirs | State machines | Crash resilient |
+| Systemd | Sockets | Activation | Lazy initialization |
+| Docker | JSON files | REST-like | API stability |
+| Apache | Shared mem | Scoreboard | High performance |
+
+*** Common Themes
+
+1. **Atomicity is paramount**: Every system uses atomic operations
+2. **Directories as data structures**: Using filesystem as database
+3. **Lock files everywhere**: Simple but effective coordination
+4. **No single point of failure**: Filesystem provides durability
+
+** Performance Considerations
+
+TODO: Analyze performance characteristics
+- [ ] Benchmark queue operations
+- [ ] Measure lock contention
+- [ ] Compare with database-backed alternatives
+- [ ] Scalability limits
+
+** Security Analysis
+
+TODO: Security implications in each system
+- [ ] Permission models
+- [ ] Race condition mitigations
+- [ ] Trust boundaries
+- [ ] Privilege separation
+
+** Evolution and Trends
+
+TODO: How these systems evolved
+- [ ] Historical design decisions
+- [ ] Migrations from other IPC methods
+- [ ] Future directions
+
+** Next Steps
+
+Continue to [[file:05-experiments.org][Chapter 5: Experiments]] to explore hands-on implementations of these patterns.
+
+* Exercises
+
+1. **Build a Mini-Git**: Implement basic version control using only filesystem operations
+2. **Queue System**: Create a Postfix-style queue with multiple workers
+3. **Service Manager**: Implement basic socket activation like systemd
+4. **Analyze Your System**: Find and document filesystem IPC in a system you use
+
+* References
+
+TODO: Add references to source code and documentation
+- [ ] Git source code analysis
+- [ ] Postfix architecture documents  
+- [ ] Systemd design documents
+- [ ] Docker runtime specification
+- [ ] Apache internals guide

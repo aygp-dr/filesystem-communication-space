@@ -1,0 +1,755 @@
+#+TITLE: Patterns and Idioms in Filesystem IPC
+#+AUTHOR: AYGP-DR
+#+DATE: 2025-06-28
+#+OPTIONS: toc:2 num:t
+
+* Universal Patterns Across Filesystem IPC
+
+** Overview
+
+This chapter explores recurring patterns and idioms that emerge when using the filesystem for inter-process communication. These patterns transcend specific primitives and provide reusable solutions to common problems.
+
+** Fundamental Patterns
+
+*** The Atomic Rename Pattern
+
+The most fundamental pattern in filesystem IPC, leveraging the atomicity of rename operations.
+
+#+begin_src mermaid :file diagrams/atomic-rename-pattern.png :mkdirp yes
+sequenceDiagram
+    participant Writer
+    participant Filesystem
+    participant Reader
+    
+    Writer->>Filesystem: write(.tmp.file)
+    Writer->>Filesystem: fsync(.tmp.file)
+    Writer->>Filesystem: rename(.tmp.file, final.file)
+    Note over Filesystem: Atomic operation
+    Reader->>Filesystem: open(final.file)
+    Note over Reader: Sees complete file or nothing
+#+end_src
+
+#+begin_src python :tangle patterns/atomic_operations.py :mkdirp yes
+"""
+Atomic operations patterns for filesystem IPC.
+"""
+
+import os
+import tempfile
+import json
+from pathlib import Path
+from contextlib import contextmanager
+
+class AtomicWriter:
+    """Ensures atomic writes using rename"""
+    
+    def __init__(self, target_path):
+        self.target = Path(target_path)
+        self.dir = self.target.parent
+        
+    @contextmanager
+    def write(self):
+        """Context manager for atomic writes"""
+        # Create temp file in same directory (same filesystem)
+        fd, temp_path = tempfile.mkstemp(
+            dir=str(self.dir),
+            prefix='.tmp-',
+            suffix=self.target.suffix
+        )
+        
+        try:
+            with os.fdopen(fd, 'w') as f:
+                yield f
+                f.flush()
+                os.fsync(f.fileno())
+            
+            # Atomic rename
+            os.rename(temp_path, self.target)
+        except:
+            # Clean up on error
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
+
+class AtomicUpdate:
+    """Read-modify-write with atomicity"""
+    
+    def __init__(self, file_path):
+        self.path = Path(file_path)
+        
+    def update(self, modifier):
+        """Atomically update file contents"""
+        # Read current state
+        try:
+            with open(self.path) as f:
+                current = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            current = {}
+        
+        # Modify
+        modified = modifier(current)
+        
+        # Write atomically
+        writer = AtomicWriter(self.path)
+        with writer.write() as f:
+            json.dump(modified, f)
+            
+    # TODO: Implement variations
+    # - [ ] Binary file updates
+    # - [ ] Line-based updates
+    # - [ ] Checksummed updates
+#+end_src
+
+*** The Lock-Free Queue Pattern
+
+Implementing queues without explicit locking, using filesystem ordering guarantees.
+
+#+begin_src python :tangle patterns/lock_free_queue.py :mkdirp yes
+"""
+Lock-free queue patterns using directory operations.
+"""
+
+import os
+import time
+import uuid
+from pathlib import Path
+from typing import Optional, List
+
+class LockFreeFileQueue:
+    """
+    A lock-free queue using directory entries as queue items.
+    Relies on atomic rename() and readdir() ordering.
+    """
+    
+    def __init__(self, queue_dir):
+        self.queue_dir = Path(queue_dir)
+        self.pending = self.queue_dir / "pending"
+        self.processing = self.queue_dir / "processing"
+        self.completed = self.queue_dir / "completed"
+        
+        # Create directory structure
+        for d in [self.pending, self.processing, self.completed]:
+            d.mkdir(parents=True, exist_ok=True)
+    
+    def enqueue(self, data: bytes) -> str:
+        """Add item to queue"""
+        # Timestamp ensures ordering
+        item_id = f"{time.time_ns()}-{uuid.uuid4().hex}"
+        
+        # Write to pending
+        item_path = self.pending / f"{item_id}.item"
+        item_path.write_bytes(data)
+        
+        return item_id
+    
+    def dequeue(self) -> Optional[tuple[str, bytes]]:
+        """Claim and return next item"""
+        # List items in order
+        items = sorted(self.pending.glob("*.item"))
+        
+        for item in items:
+            # Try to claim by moving to processing
+            item_id = item.stem
+            processing_path = self.processing / f"{item_id}.item"
+            
+            try:
+                # Atomic rename to claim
+                os.rename(item, processing_path)
+                # Successfully claimed
+                data = processing_path.read_bytes()
+                return (item_id, data)
+            except OSError:
+                # Another worker got it
+                continue
+        
+        return None
+    
+    def complete(self, item_id: str):
+        """Mark item as completed"""
+        processing_path = self.processing / f"{item_id}.item"
+        completed_path = self.completed / f"{item_id}.item"
+        
+        try:
+            os.rename(processing_path, completed_path)
+        except OSError:
+            pass  # Already completed
+
+class TimestampQueue:
+    """Queue with timestamp-based ordering"""
+    
+    def __init__(self, queue_dir):
+        self.queue_dir = Path(queue_dir)
+        self.queue_dir.mkdir(exist_ok=True)
+        
+    def enqueue_with_priority(self, data: bytes, priority: int):
+        """Enqueue with priority (lower number = higher priority)"""
+        # Encode priority in filename for sorting
+        timestamp = time.time_ns()
+        name = f"{priority:05d}-{timestamp}-{os.getpid()}.msg"
+        
+        path = self.queue_dir / name
+        path.write_bytes(data)
+        
+    def dequeue_highest_priority(self) -> Optional[bytes]:
+        """Dequeue highest priority item"""
+        # Lexicographic sort gives us priority order
+        items = sorted(self.queue_dir.glob("*.msg"))
+        
+        if not items:
+            return None
+            
+        # TODO: Implement claiming mechanism
+        pass
+#+end_src
+
+*** The Publish-Subscribe Pattern
+
+#+begin_src python :tangle patterns/pubsub.py :mkdirp yes
+"""
+Publish-subscribe patterns using filesystem primitives.
+"""
+
+import os
+import time
+import json
+from pathlib import Path
+from typing import Callable, Dict, List
+
+class FilesystemPubSub:
+    """Simple pub-sub using directories and files"""
+    
+    def __init__(self, base_dir):
+        self.base = Path(base_dir)
+        self.topics = self.base / "topics"
+        self.subscribers = self.base / "subscribers"
+        
+        self.topics.mkdir(parents=True, exist_ok=True)
+        self.subscribers.mkdir(parents=True, exist_ok=True)
+    
+    def publish(self, topic: str, message: dict):
+        """Publish message to topic"""
+        topic_dir = self.topics / topic
+        topic_dir.mkdir(exist_ok=True)
+        
+        # Create message file
+        msg_id = f"{time.time_ns()}-{os.getpid()}"
+        msg_file = topic_dir / f"{msg_id}.msg"
+        
+        # Atomic write
+        tmp_file = msg_file.with_suffix('.tmp')
+        with open(tmp_file, 'w') as f:
+            json.dump({
+                'id': msg_id,
+                'topic': topic,
+                'timestamp': time.time(),
+                'message': message
+            }, f)
+        
+        os.rename(tmp_file, msg_file)
+        
+        # Notify subscribers (simple touch-based notification)
+        self._notify_subscribers(topic)
+    
+    def subscribe(self, subscriber_id: str, topic: str, 
+                 callback: Callable[[dict], None]):
+        """Subscribe to topic"""
+        # Create subscriber directory
+        sub_dir = self.subscribers / subscriber_id
+        sub_dir.mkdir(exist_ok=True)
+        
+        # Record subscription
+        sub_file = sub_dir / f"{topic}.sub"
+        sub_file.touch()
+        
+        # TODO: Implement message delivery
+        # - [ ] Polling mechanism
+        # - [ ] Inotify integration
+        # - [ ] Message acknowledgment
+        
+    def _notify_subscribers(self, topic: str):
+        """Notify subscribers of new message"""
+        # Touch notification files
+        for sub_dir in self.subscribers.iterdir():
+            sub_file = sub_dir / f"{topic}.sub"
+            if sub_file.exists():
+                notify_file = sub_dir / f"{topic}.notify"
+                notify_file.touch()
+
+class DurableSubscription:
+    """Subscription that survives restarts"""
+    
+    def __init__(self, subscription_dir):
+        self.sub_dir = Path(subscription_dir)
+        self.sub_dir.mkdir(exist_ok=True)
+        
+        # Track last processed message
+        self.checkpoint_file = self.sub_dir / "checkpoint"
+        
+    def get_checkpoint(self) -> str:
+        """Get last processed message ID"""
+        try:
+            return self.checkpoint_file.read_text().strip()
+        except FileNotFoundError:
+            return ""
+    
+    def update_checkpoint(self, msg_id: str):
+        """Update checkpoint atomically"""
+        writer = AtomicWriter(self.checkpoint_file)
+        with writer.write() as f:
+            f.write(msg_id)
+#+end_src
+
+*** The Coordinator Pattern
+
+Using filesystem primitives for distributed coordination.
+
+#+begin_src python :tangle patterns/coordination.py :mkdirp yes
+"""
+Coordination patterns using filesystem primitives.
+"""
+
+import os
+import time
+import fcntl
+from pathlib import Path
+from contextlib import contextmanager
+from typing import List, Optional
+
+class LeaderElection:
+    """Leader election using filesystem locks"""
+    
+    def __init__(self, election_dir):
+        self.election_dir = Path(election_dir)
+        self.election_dir.mkdir(exist_ok=True)
+        self.leader_file = self.election_dir / "leader"
+        
+    def try_become_leader(self) -> bool:
+        """Attempt to become leader"""
+        try:
+            # Use O_EXCL for atomic creation
+            fd = os.open(self.leader_file, 
+                        os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                        0o644)
+            
+            # Write our info
+            info = f"{os.getpid()}:{time.time()}\n"
+            os.write(fd, info.encode())
+            os.close(fd)
+            
+            return True
+        except OSError:
+            return False
+    
+    def get_current_leader(self) -> Optional[int]:
+        """Get PID of current leader"""
+        try:
+            with open(self.leader_file) as f:
+                pid_str = f.read().split(':')[0]
+                return int(pid_str)
+        except (FileNotFoundError, ValueError):
+            return None
+    
+    def abdicate(self):
+        """Give up leadership"""
+        try:
+            # Verify we are the leader
+            current = self.get_current_leader()
+            if current == os.getpid():
+                os.unlink(self.leader_file)
+        except OSError:
+            pass
+
+class DistributedBarrier:
+    """Barrier synchronization using filesystem"""
+    
+    def __init__(self, barrier_dir, participant_count):
+        self.barrier_dir = Path(barrier_dir)
+        self.barrier_dir.mkdir(exist_ok=True)
+        self.count = participant_count
+        
+    def wait(self, participant_id: str, timeout: float = None):
+        """Wait for all participants"""
+        # Register arrival
+        arrival_file = self.barrier_dir / f"{participant_id}.arrived"
+        arrival_file.touch()
+        
+        # Wait for all participants
+        start_time = time.time()
+        while True:
+            arrivals = list(self.barrier_dir.glob("*.arrived"))
+            if len(arrivals) >= self.count:
+                # All arrived, clean up
+                for f in arrivals:
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+                return
+            
+            if timeout and (time.time() - start_time) > timeout:
+                raise TimeoutError("Barrier timeout")
+            
+            time.sleep(0.1)  # Polling interval
+
+class ConsensusProtocol:
+    """Simple consensus using filesystem"""
+    
+    def __init__(self, consensus_dir):
+        self.consensus_dir = Path(consensus_dir)
+        self.proposals = self.consensus_dir / "proposals"
+        self.votes = self.consensus_dir / "votes"
+        
+        self.proposals.mkdir(parents=True, exist_ok=True)
+        self.votes.mkdir(parents=True, exist_ok=True)
+    
+    def propose(self, proposal_id: str, value: str):
+        """Make a proposal"""
+        proposal_file = self.proposals / f"{proposal_id}.proposal"
+        proposal_file.write_text(value)
+    
+    def vote(self, voter_id: str, proposal_id: str):
+        """Vote for a proposal"""
+        vote_file = self.votes / f"{proposal_id}-{voter_id}.vote"
+        vote_file.touch()
+    
+    # TODO: Implement consensus checking
+    # - [ ] Quorum detection
+    # - [ ] Vote counting
+    # - [ ] Conflict resolution
+#+end_src
+
+** Advanced Patterns
+
+*** The Event Bus Pattern
+
+#+begin_src python :tangle patterns/event_bus.py :mkdirp yes
+"""
+Event bus implementation using filesystem.
+"""
+
+import os
+import time
+import json
+import hashlib
+from pathlib import Path
+from typing import Dict, List, Callable
+from collections import defaultdict
+
+class FilesystemEventBus:
+    """Event bus with persistence and replay capability"""
+    
+    def __init__(self, bus_dir):
+        self.bus_dir = Path(bus_dir)
+        self.events = self.bus_dir / "events"
+        self.snapshots = self.bus_dir / "snapshots"
+        self.indexes = self.bus_dir / "indexes"
+        
+        for d in [self.events, self.snapshots, self.indexes]:
+            d.mkdir(parents=True, exist_ok=True)
+    
+    def emit(self, event_type: str, data: dict) -> str:
+        """Emit an event"""
+        event = {
+            'type': event_type,
+            'timestamp': time.time(),
+            'data': data,
+            'emitter': os.getpid()
+        }
+        
+        # Generate event ID
+        event_id = hashlib.sha256(
+            json.dumps(event, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        
+        event['id'] = event_id
+        
+        # Store event
+        event_file = self.events / f"{time.time_ns()}-{event_id}.event"
+        
+        # Atomic write
+        tmp_file = event_file.with_suffix('.tmp')
+        with open(tmp_file, 'w') as f:
+            json.dump(event, f)
+        os.rename(tmp_file, event_file)
+        
+        # Update indexes
+        self._index_event(event)
+        
+        return event_id
+    
+    def replay(self, from_timestamp: float = 0, 
+              event_types: List[str] = None) -> List[dict]:
+        """Replay events from timestamp"""
+        events = []
+        
+        for event_file in sorted(self.events.glob("*.event")):
+            # Extract timestamp from filename
+            ts = int(event_file.stem.split('-')[0]) / 1e9
+            
+            if ts < from_timestamp:
+                continue
+            
+            with open(event_file) as f:
+                event = json.load(f)
+                
+            if event_types and event['type'] not in event_types:
+                continue
+                
+            events.append(event)
+        
+        return events
+    
+    def _index_event(self, event: dict):
+        """Update event indexes"""
+        # Index by type
+        type_index = self.indexes / "by_type" / event['type']
+        type_index.mkdir(parents=True, exist_ok=True)
+        
+        index_entry = type_index / f"{event['timestamp']}-{event['id']}"
+        index_entry.touch()
+        
+        # TODO: Implement additional indexes
+        # - [ ] By emitter
+        # - [ ] By data attributes
+        # - [ ] Time-based buckets
+#+end_src
+
+*** The State Machine Pattern
+
+#+begin_src python :tangle patterns/state_machine.py :mkdirp yes
+"""
+Distributed state machines using filesystem.
+"""
+
+import os
+import json
+import fcntl
+from pathlib import Path
+from enum import Enum
+from typing import Dict, Optional, Callable
+
+class StateMachine:
+    """Filesystem-backed state machine"""
+    
+    def __init__(self, state_dir, initial_state: str):
+        self.state_dir = Path(state_dir)
+        self.state_dir.mkdir(exist_ok=True)
+        
+        self.state_file = self.state_dir / "current_state"
+        self.history_dir = self.state_dir / "history"
+        self.history_dir.mkdir(exist_ok=True)
+        
+        # Initialize if needed
+        if not self.state_file.exists():
+            self._set_state(initial_state, {})
+    
+    def get_state(self) -> tuple[str, dict]:
+        """Get current state and data"""
+        with open(self.state_file) as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            data = json.load(f)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        
+        return data['state'], data.get('data', {})
+    
+    def transition(self, new_state: str, 
+                  transition_data: dict = None,
+                  condition: Callable[[str, dict], bool] = None) -> bool:
+        """Attempt state transition"""
+        
+        with open(self.state_file, 'r+') as f:
+            # Exclusive lock for transition
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            
+            try:
+                # Read current state
+                f.seek(0)
+                current = json.load(f)
+                current_state = current['state']
+                current_data = current.get('data', {})
+                
+                # Check condition
+                if condition and not condition(current_state, current_data):
+                    return False
+                
+                # Record history
+                self._record_transition(current_state, new_state, transition_data)
+                
+                # Update state
+                new_data = {
+                    'state': new_state,
+                    'data': transition_data or current_data,
+                    'timestamp': time.time(),
+                    'pid': os.getpid()
+                }
+                
+                f.seek(0)
+                json.dump(new_data, f)
+                f.truncate()
+                
+                return True
+                
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    
+    def _record_transition(self, from_state: str, to_state: str, data: dict):
+        """Record state transition in history"""
+        transition = {
+            'from': from_state,
+            'to': to_state,
+            'data': data,
+            'timestamp': time.time(),
+            'pid': os.getpid()
+        }
+        
+        history_file = self.history_dir / f"{time.time_ns()}.transition"
+        with open(history_file, 'w') as f:
+            json.dump(transition, f)
+
+# TODO: Implement distributed state machine patterns
+# - [ ] Multi-process coordination
+# - [ ] Consensus on transitions  
+# - [ ] State replication
+#+end_src
+
+** Anti-Patterns and Pitfalls
+
+*** Common Mistakes
+
+#+begin_src python :tangle patterns/antipatterns.py :mkdirp yes
+"""
+Examples of what NOT to do in filesystem IPC.
+"""
+
+# ANTI-PATTERN 1: Non-atomic updates
+def bad_update(file_path, data):
+    """DON'T DO THIS: Opens race condition window"""
+    with open(file_path, 'w') as f:
+        f.write(data)  # Partial writes visible!
+
+# ANTI-PATTERN 2: PID files without verification
+def bad_lock(lock_file):
+    """DON'T DO THIS: Stale locks will accumulate"""
+    with open(lock_file, 'w') as f:
+        f.write(str(os.getpid()))
+    # No cleanup, no stale detection!
+
+# ANTI-PATTERN 3: Busy waiting without backoff
+def bad_wait(condition_file):
+    """DON'T DO THIS: Wastes CPU"""
+    while not os.path.exists(condition_file):
+        pass  # Spinning!
+
+# ANTI-PATTERN 4: Assuming atomic reads
+def bad_read(file_path):
+    """DON'T DO THIS: May see partial writes"""
+    with open(file_path) as f:
+        return f.read()  # Not atomic for large files!
+
+# TODO: Document more anti-patterns
+# - [ ] Not handling EINTR
+# - [ ] Ignoring TOCTOU races
+# - [ ] Assuming filesystem ordering
+# - [ ] Not considering NFS semantics
+#+end_src
+
+*** Race Condition Catalog
+
+TODO: Document common race conditions
+- [ ] TOCTOU (Time-of-check to time-of-use)
+- [ ] Directory traversal races
+- [ ] Signal delivery races
+- [ ] Cleanup races
+
+** Performance Patterns
+
+*** Batching and Buffering
+
+#+begin_src python :tangle patterns/performance.py :mkdirp yes
+"""
+Performance optimization patterns.
+"""
+
+import os
+import time
+from pathlib import Path
+from typing import List
+
+class BatchWriter:
+    """Batch multiple writes for performance"""
+    
+    def __init__(self, target_dir, batch_size=100, flush_interval=1.0):
+        self.target_dir = Path(target_dir)
+        self.batch_size = batch_size
+        self.flush_interval = flush_interval
+        
+        self.pending = []
+        self.last_flush = time.time()
+    
+    def write(self, filename: str, data: bytes):
+        """Add to batch"""
+        self.pending.append((filename, data))
+        
+        if len(self.pending) >= self.batch_size:
+            self.flush()
+        elif time.time() - self.last_flush > self.flush_interval:
+            self.flush()
+    
+    def flush(self):
+        """Flush all pending writes"""
+        if not self.pending:
+            return
+        
+        # Write all to temp directory first
+        temp_dir = self.target_dir / ".batch_tmp"
+        temp_dir.mkdir(exist_ok=True)
+        
+        # Batch write
+        for filename, data in self.pending:
+            temp_path = temp_dir / filename
+            temp_path.write_bytes(data)
+        
+        # Sync directory
+        dir_fd = os.open(temp_dir, os.O_RDONLY)
+        os.fsync(dir_fd)
+        os.close(dir_fd)
+        
+        # Move all at once
+        for filename, _ in self.pending:
+            temp_path = temp_dir / filename
+            final_path = self.target_dir / filename
+            os.rename(temp_path, final_path)
+        
+        self.pending.clear()
+        self.last_flush = time.time()
+
+# TODO: Implement more performance patterns
+# - [ ] Read-ahead buffering
+# - [ ] Write combining
+# - [ ] Directory entry caching
+# - [ ] Lazy deletion
+#+end_src
+
+** Next Steps
+
+Continue to [[file:04-case-studies.org][Chapter 4: Case Studies]] to see these patterns applied in real-world systems.
+
+* Pattern Catalog Summary
+
+| Pattern | Use Case | Key Primitive | Guarantees |
+|---------|----------|---------------|------------|
+| Atomic Rename | Safe updates | rename() | All-or-nothing visibility |
+| Lock-Free Queue | High concurrency | Directory ops | FIFO ordering |
+| Publish-Subscribe | Event distribution | Files + dirs | Persistent delivery |
+| Leader Election | Coordination | O_EXCL | Single leader |
+| Event Bus | Event sourcing | Append-only | Event ordering |
+| State Machine | Process coordination | Locked files | Consistency |
+
+* Exercises
+
+1. **Pattern Combination**: Combine atomic rename with lock-free queue for a robust message queue
+2. **Error Recovery**: Add automatic recovery to the state machine pattern
+3. **Performance Testing**: Benchmark the event bus with varying numbers of subscribers
+4. **Custom Pattern**: Design a new pattern for your specific use case
