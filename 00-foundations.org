@@ -2,6 +2,7 @@
 #+AUTHOR: AYGP-DR
 #+DATE: 2025-06-28
 #+OPTIONS: toc:2 num:t
+#+PROPERTY: header-args:mermaid :comments no
 
 * The Filesystem as Shared Reality
 
@@ -41,7 +42,7 @@ class FilesystemEntity:
 
 The filesystem namespace provides a shared reality where processes can agree on names and locations for communication.
 
-#+begin_src mermaid :file diagrams/namespace-social-contract.png :tangle diagrams/namespace-social-contract.mmd :mkdirp yes :comments link
+#+begin_src mermaid :file diagrams/namespace-social-contract.png :tangle diagrams/namespace-social-contract.mmd :mkdirp yes
 graph TD
     NS[Filesystem Namespace]
     P1[Process 1]

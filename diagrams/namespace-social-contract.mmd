@@ -1,0 +1,13 @@
+graph TD
+    NS[Filesystem Namespace]
+    P1[Process 1]
+    P2[Process 2]
+    P3[Process 3]
+    
+    NS -->|provides names| P1
+    NS -->|provides names| P2
+    NS -->|provides names| P3
+    
+    P1 -.->|agrees on /tmp/socket| P2
+    P2 -.->|agrees on /var/run/lock| P3
+    P1 -.->|agrees on /dev/shm/buffer| P3

@@ -55,10 +55,15 @@ To sync changes back to org files:
 
 *** From Command Line
 
+*Note*: Batch mode detangling has known limitations. See [[https://github.com/aygp-dr/filesystem-communication-space/issues/1][Issue #1]].
+
 #+begin_src bash
+# This may report success but not actually update the org file
 emacs --batch -l org -l ob-tangle \
       --eval "(org-babel-detangle \"path/to/tangled/file.py\")"
 #+end_src
+
+For reliable detangling, use interactive mode in Emacs.
 
 *** Batch Detangling
 
