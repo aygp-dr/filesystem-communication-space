@@ -15,7 +15,7 @@ This chapter examines how real-world systems use filesystem-based IPC, analyzing
 
 Git uses the filesystem extensively for both storage and communication between processes.
 
-#+begin_src mermaid :file diagrams/git-filesystem-ipc.png :mkdirp yes
+#+begin_src mermaid :file diagrams/git-filesystem-ipc.png :tangle diagrams/git-filesystem-ipc.mmd :mkdirp yes
 graph TD
     WD[Working Directory]
     IDX[.git/index]
@@ -146,7 +146,7 @@ class GitObjectStore:
 
 Postfix uses a queue-based architecture with different processes handling different stages.
 
-#+begin_src mermaid :file diagrams/postfix-queue-architecture.png :mkdirp yes
+#+begin_src mermaid :file diagrams/postfix-queue-architecture.png :tangle diagrams/postfix-queue-architecture.mmd :mkdirp yes
 graph LR
     SMTP[SMTP Server] -->|write| INCOMING[incoming/]
     INCOMING -->|move| ACTIVE[active/]

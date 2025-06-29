@@ -149,7 +149,7 @@ class StaticRendezvous:
 
 Processes discover each other through filesystem scanning or events.
 
-#+begin_src mermaid :file diagrams/dynamic-discovery-flow.png :mkdirp yes
+#+begin_src mermaid :file diagrams/dynamic-discovery-flow.png :tangle diagrams/dynamic-discovery-flow.mmd :mkdirp yes
 sequenceDiagram
     participant Service
     participant Filesystem

@@ -9,7 +9,7 @@
 
 This chapter provides a comprehensive catalog of all mechanisms that enable inter-process communication through the filesystem namespace.
 
-#+begin_src mermaid :file diagrams/ipc-taxonomy.png :mkdirp yes
+#+begin_src mermaid :file diagrams/ipc-taxonomy.png :tangle diagrams/ipc-taxonomy.mmd :mkdirp yes
 graph TD
     IPC[Filesystem IPC]
     

@@ -15,7 +15,7 @@ This chapter explores recurring patterns and idioms that emerge when using the f
 
 The most fundamental pattern in filesystem IPC, leveraging the atomicity of rename operations.
 
-#+begin_src mermaid :file diagrams/atomic-rename-pattern.png :mkdirp yes
+#+begin_src mermaid :file diagrams/atomic-rename-pattern.png :tangle diagrams/atomic-rename-pattern.mmd :mkdirp yes
 sequenceDiagram
     participant Writer
     participant Filesystem
