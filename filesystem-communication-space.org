@@ -14,8 +14,6 @@
 
 This comprehensive document explores the filesystem as a communication space, examining how filesystem namespaces serve as meeting points for inter-process communication. Through literate programming techniques, we catalog primitives from simple files to sophisticated kernel interfaces, analyze patterns, and provide practical implementations.
 
-#+INCLUDE: "README.org" :lines "7-"
-
 * Foundations
 #+INCLUDE: "00-foundations.org" :lines "8-"
 

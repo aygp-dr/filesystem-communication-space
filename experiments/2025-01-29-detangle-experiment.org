@@ -1,0 +1,182 @@
+#+TITLE: Detangle Experiment
+#+AUTHOR: aygp-dr
+#+DATE: 2025-01-29
+#+PROPERTY: Status In Progress
+
+* Summary
+
+Testing org-babel-detangle functionality to understand how changes in tangled files can be propagated back to org source files.
+
+* Motivation
+
+To determine if we can support bidirectional synchronization between org files and tangled source code, enabling developers to edit either format and sync changes.
+
+* Experiment Setup
+
+** Test File with Comments
+
+First, let's create a simple test with the `:comments link` directive:
+
+#+begin_src python :tangle experiments/detangle_test.py :mkdirp yes :comments link
+#!/usr/bin/env python3
+"""Test file for detangle experiment"""
+
+def greet(name):
+    """Original greeting function"""
+    return f"Hello, {name}!"
+
+def main():
+    print(greet("World"))
+    # This comment will be edited in the tangled file
+
+if __name__ == "__main__":
+    main()
+#+end_src
+
+** Test File without Comments
+
+For comparison, a block without comments:
+
+#+begin_src python :tangle experiments/detangle_no_comments.py :mkdirp yes
+#!/usr/bin/env python3
+"""Test file without comment links"""
+
+def greet(name):
+    return f"Hello, {name}!"
+#+end_src
+
+* Testing Process
+
+** Step 1: Tangle the Files
+
+#+begin_src bash :results output
+cd /home/aygp-dr/projects/aygp-dr/filesystem-communication-space
+emacs --batch --load org --eval '(org-babel-tangle-file "experiments/2025-01-29-detangle-experiment.org")'
+#+end_src
+
+** Step 2: Examine Tangled Files
+
+#+begin_src bash :results output
+echo "=== File with comments ==="
+cat experiments/detangle_test.py
+echo -e "\n=== File without comments ==="
+cat experiments/detangle_no_comments.py
+#+end_src
+
+** Step 3: Modify Tangled File
+
+#+begin_src bash :results output
+# Make a change to the tangled file
+sed -i 's/Hello/Greetings/' experiments/detangle_test.py
+sed -i 's/This comment will be edited/This comment was EDITED/' experiments/detangle_test.py
+echo "Modified detangle_test.py"
+#+end_src
+
+** Step 4: Attempt Detangle
+
+#+begin_src elisp :results output
+(org-babel-detangle "experiments/detangle_test.py")
+#+end_src
+
+* Implementation of Detangle Support
+
+** Adding Comments to All Source Blocks
+
+To enable detangling for all our source blocks, we would need to:
+
+#+begin_src bash :tangle experiments/add_comments_directive.sh :mkdirp yes :shebang #!/bin/bash
+#!/bin/bash
+# Script to add :comments link to all source blocks
+
+for file in [0-9][0-9]-*.org; do
+    echo "Processing $file..."
+    # Add :comments link to Python blocks
+    sed -i 's/\(begin_src python.*\) :mkdirp yes$/\1 :mkdirp yes :comments link/' "$file"
+    sed -i 's/\(begin_src python.*\) :mkdirp yes :shebang/\1 :mkdirp yes :comments link :shebang/' "$file"
+    
+    # Add :comments link to other language blocks
+    sed -i 's/\(begin_src c.*\) :mkdirp yes$/\1 :mkdirp yes :comments link/' "$file"
+    sed -i 's/\(begin_src bash.*\) :mkdirp yes$/\1 :mkdirp yes :comments link/' "$file"
+done
+#+end_src
+
+** Detangle Wrapper Function
+
+#+begin_src python :tangle experiments/detangle_wrapper.py :mkdirp yes :comments link
+#!/usr/bin/env python3
+"""Wrapper for org-babel-detangle operations"""
+
+import os
+import subprocess
+import glob
+
+def find_tangled_files():
+    """Find all files that were tangled from org sources"""
+    tangled_files = []
+    
+    # Look for files with org-mode comment links
+    for root, dirs, files in os.walk('.'):
+        for file in files:
+            if file.endswith(('.py', '.c', '.sh')):
+                filepath = os.path.join(root, file)
+                try:
+                    with open(filepath, 'r') as f:
+                        content = f.read()
+                        if '[[file:' in content and '.org::' in content:
+                            tangled_files.append(filepath)
+                except:
+                    pass
+    
+    return tangled_files
+
+def detangle_file(filepath):
+    """Detangle a single file back to its org source"""
+    elisp_code = f'(org-babel-detangle "{filepath}")'
+    
+    cmd = [
+        'emacs', '--batch',
+        '--load', 'org',
+        '--eval', elisp_code
+    ]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0
+
+def main():
+    """Detangle all modified files"""
+    tangled_files = find_tangled_files()
+    
+    print(f"Found {len(tangled_files)} tangled files")
+    
+    for file in tangled_files:
+        print(f"Detangling {file}...")
+        if detangle_file(file):
+            print(f"  ✓ Success")
+        else:
+            print(f"  ✗ Failed")
+
+if __name__ == "__main__":
+    main()
+#+end_src
+
+* Results and Analysis
+
+** Expected Behavior
+
+1. Files tangled with `:comments link` will contain special comment markers
+2. These markers link code blocks back to their source location in org files
+3. `org-babel-detangle` can parse these comments and update the org source
+
+** Limitations
+
+1. Only works with `:comments link` or `:comments yes`
+2. Requires careful handling of code structure changes
+3. May not handle all edge cases (moved blocks, deleted code, etc.)
+
+** Recommendation
+
+TODO: Based on experiment results, recommend whether to add `:comments link` to all blocks
+
+* Conclusion
+
+TODO: Document findings and decision about implementing detangle support
