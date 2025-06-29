@@ -1,0 +1,175 @@
+#+TITLE: Detangling Guide
+#+AUTHOR: aygp-dr
+#+DATE: 2025-01-29
+#+OPTIONS: toc:t num:nil
+
+* Overview
+
+This repository supports bidirectional synchronization between org-mode source files and tangled code files through org-babel-detangle.
+
+* What is Detangling?
+
+Detangling allows you to:
+1. Edit tangled source code files directly
+2. Sync those changes back to the original org-mode files
+3. Maintain a single source of truth while working in your preferred environment
+
+* How It Works
+
+** Comment Links
+
+All source blocks in this repository include ~:comments link~, which adds special markers to tangled files:
+
+#+begin_example
+# [[file:~/path/to/00-foundations.org::*Section Name][Section Name:1]]
+def my_function():
+    """Your code here"""
+    pass
+# Section Name:1 ends here
+#+end_example
+
+These comments link the code back to its source location in the org file.
+
+** Tangling Process
+
+To extract all source code:
+#+begin_src bash
+make tangle
+#+end_src
+
+This creates:
+- Python files in ~core/~, ~patterns/~, ~experiments/~, etc.
+- Mermaid diagrams in ~diagrams/~ (.mmd files)
+- Shell scripts in ~scripts/~
+- C code in ~history/~
+
+** Detangling Process
+
+To sync changes back to org files:
+
+*** From Emacs
+
+1. Open the tangled file you edited
+2. Run ~M-x org-babel-detangle~
+3. Confirm the changes
+
+*** From Command Line
+
+#+begin_src bash
+emacs --batch -l org -l ob-tangle \
+      --eval "(org-babel-detangle \"path/to/tangled/file.py\")"
+#+end_src
+
+*** Batch Detangling
+
+Use the provided wrapper script:
+#+begin_src bash
+python experiments/experiments/detangle_wrapper.py
+#+end_src
+
+* Best Practices
+
+** When to Edit Org Files
+
+- Adding new concepts or sections
+- Restructuring documentation
+- Adding explanatory text
+- Creating new experiments
+
+** When to Edit Tangled Files
+
+- Debugging code
+- Quick fixes
+- Testing in IDE/editor
+- Collaborative development
+
+** Workflow Example
+
+1. Tangle the code: ~make tangle~
+2. Work on the Python files in your IDE
+3. Test and debug as needed
+4. Detangle to sync changes: ~org-babel-detangle~
+5. Commit the org files
+
+* Limitations
+
+** What Detangling Can Handle
+
+- ✓ Code changes within existing blocks
+- ✓ Comment modifications
+- ✓ Whitespace and formatting changes
+- ✓ Adding lines within blocks
+
+** What Detangling Cannot Handle
+
+- ✗ Adding new functions outside marked regions
+- ✗ Deleting entire code blocks
+- ✗ Moving code between files
+- ✗ Structural changes to the file
+
+* Troubleshooting
+
+** Changes Not Syncing
+
+1. Verify the file has comment markers
+2. Check that you're detangling the correct file
+3. Ensure no syntax errors in the code
+
+** Lost Comment Markers
+
+If comment markers are accidentally deleted:
+1. Re-tangle the org file
+2. Manually merge your changes
+3. Use version control to track changes
+
+** Conflicts
+
+If detangling fails due to conflicts:
+1. Check git diff to see changes
+2. Manually apply changes to org file
+3. Re-tangle to verify consistency
+
+* Technical Details
+
+** Required Headers
+
+Each tangleable block must have:
+#+begin_example
+#+begin_src language :tangle path/to/file :mkdirp yes :comments link
+#+end_example
+
+** Supported Languages
+
+- Python (.py)
+- Bash (.sh) 
+- C (.c, .h)
+- Mermaid (.mmd)
+
+** File Organization
+
+Tangled files maintain the same structure:
+- Source blocks from one section stay together
+- Order is preserved
+- Section headers become comment markers
+
+* Integration with Development Tools
+
+** VS Code / IDE Usage
+
+1. Open the project root
+2. Edit tangled Python files normally
+3. Use terminal to run detangle command
+4. Git commit org files
+
+** Continuous Integration
+
+For CI/CD pipelines:
+1. Run ~make tangle~ to extract code
+2. Run tests on tangled files
+3. No need to detangle in CI
+
+* See Also
+
+- [[file:experiments/2025-01-29-detangle-experiment.org][Detangle Experiment]] - Technical demonstration
+- [[https://orgmode.org/manual/Extracting-Source-Code.html][Org-mode Manual: Extracting Source Code]]
+- [[https://orgmode.org/manual/Noweb-Reference-Syntax.html][Noweb Reference Syntax]]
