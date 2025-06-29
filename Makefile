@@ -1,7 +1,7 @@
 # Makefile for Filesystem Communication Space
 # Handles tangling org files, running experiments, and generating diagrams
 
-.PHONY: all tangle experiments benchmark diagrams clean help
+.PHONY: all tangle experiments benchmark diagrams clean help pdf
 
 # Default target
 all: tangle diagrams
@@ -14,8 +14,22 @@ help:
 	@echo "  experiments - Run all experiments"
 	@echo "  benchmark   - Run performance benchmarks"
 	@echo "  diagrams    - Generate Mermaid diagrams"
+	@echo "  pdf         - Generate PDF documentation"
 	@echo "  clean       - Remove generated files"
 	@echo "  help        - Show this help message"
+
+# Generate PDF documentation
+filesystem-communication-space.pdf: filesystem-communication-space.org
+	@echo "Generating PDF documentation..."
+	@emacs --batch \
+		--load publish-config.el \
+		--eval "(org-open-file \"filesystem-communication-space.org\")" \
+		--eval "(org-latex-export-to-pdf)" \
+		--kill
+	@echo "PDF generation complete!"
+
+# Convenience target for PDF
+pdf: filesystem-communication-space.pdf
 
 # Tangle all org files to extract source code
 tangle:
@@ -81,6 +95,7 @@ clean:
 	@rm -f diagrams/*.png diagrams/*.svg
 	@find . -name "*.pyc" -delete
 	@find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+	@rm -f *.tex *.log *.aux *.out *.toc *.lof *.lot
 	@echo "Clean complete!"
 
 # Install dependencies (optional)

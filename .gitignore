@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# LaTeX intermediate files
+*.aux
+*.log
+*.tex
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+
+# Generated directories
+experiments/
+patterns/
+analysis/
+security/
+core/
+
+# Emacs
+*~
+\#*\#
+.\#*
+.org-id-locations
+*_archive
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep the PDF
+!filesystem-communication-space.pdf
