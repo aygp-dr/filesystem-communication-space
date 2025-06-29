@@ -15,7 +15,7 @@ This chapter examines how real-world systems use filesystem-based IPC, analyzing
 
 Git uses the filesystem extensively for both storage and communication between processes.
 
-#+begin_src mermaid :file diagrams/git-filesystem-ipc.png :tangle diagrams/git-filesystem-ipc.mmd :mkdirp yes
+#+begin_src mermaid :file diagrams/git-filesystem-ipc.png :tangle diagrams/git-filesystem-ipc.mmd :mkdirp yes :comments link
 graph TD
     WD[Working Directory]
     IDX[.git/index]
@@ -36,7 +36,7 @@ graph TD
 
 *** IPC Mechanisms in Git
 
-#+begin_src python :tangle case_studies/git_patterns.py :mkdirp yes
+#+begin_src python :tangle case_studies/git_patterns.py :mkdirp yes :comments link
 """
 Git's filesystem IPC patterns.
 """
@@ -146,7 +146,7 @@ class GitObjectStore:
 
 Postfix uses a queue-based architecture with different processes handling different stages.
 
-#+begin_src mermaid :file diagrams/postfix-queue-architecture.png :tangle diagrams/postfix-queue-architecture.mmd :mkdirp yes
+#+begin_src mermaid :file diagrams/postfix-queue-architecture.png :tangle diagrams/postfix-queue-architecture.mmd :mkdirp yes :comments link
 graph LR
     SMTP[SMTP Server] -->|write| INCOMING[incoming/]
     INCOMING -->|move| ACTIVE[active/]
@@ -163,7 +163,7 @@ graph LR
 
 *** Queue Management Patterns
 
-#+begin_src python :tangle case_studies/postfix_patterns.py :mkdirp yes
+#+begin_src python :tangle case_studies/postfix_patterns.py :mkdirp yes :comments link
 """
 Postfix-style mail queue patterns.
 """
@@ -314,7 +314,7 @@ class PostfixLocking:
 
 Systemd's socket activation uses filesystem sockets for service activation.
 
-#+begin_src python :tangle case_studies/systemd_patterns.py :mkdirp yes
+#+begin_src python :tangle case_studies/systemd_patterns.py :mkdirp yes :comments link
 """
 Systemd-style socket activation patterns.
 """
@@ -414,7 +414,7 @@ class SystemdJournal:
 
 *** Container Coordination
 
-#+begin_src python :tangle case_studies/docker_patterns.py :mkdirp yes
+#+begin_src python :tangle case_studies/docker_patterns.py :mkdirp yes :comments link
 """
 Docker's filesystem IPC patterns.
 """
@@ -505,7 +505,7 @@ class ContainerRuntime:
 
 *** Scoreboard and Shared Memory
 
-#+begin_src python :tangle case_studies/apache_patterns.py :mkdirp yes
+#+begin_src python :tangle case_studies/apache_patterns.py :mkdirp yes :comments link
 """
 Apache's IPC patterns for process coordination.
 """

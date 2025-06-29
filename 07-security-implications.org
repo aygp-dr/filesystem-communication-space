@@ -13,7 +13,7 @@ This chapter examines the security implications of using the filesystem for inte
 
 *** Attack Vectors
 
-#+begin_src python :tangle security/threat_model.py :mkdirp yes
+#+begin_src python :tangle security/threat_model.py :mkdirp yes :comments link
 """
 Threat model for filesystem-based IPC.
 """
@@ -142,7 +142,7 @@ class FilesystemIPCThreatModel:
 
 *** Time-of-Check to Time-of-Use (TOCTOU)
 
-#+begin_src python :tangle security/toctou_vulnerabilities.py :mkdirp yes
+#+begin_src python :tangle security/toctou_vulnerabilities.py :mkdirp yes :comments link
 """
 TOCTOU vulnerability demonstrations and mitigations.
 """
@@ -312,7 +312,7 @@ class SecurePrimitives:
 
 *** Symlink and Hardlink Attacks
 
-#+begin_src python :tangle security/link_attacks.py :mkdirp yes
+#+begin_src python :tangle security/link_attacks.py :mkdirp yes :comments link
 """
 Symlink and hardlink attack patterns and defenses.
 """
@@ -513,7 +513,7 @@ class SecureFileOperations:
 
 *** Permission and Ownership Issues
 
-#+begin_src python :tangle security/permission_security.py :mkdirp yes
+#+begin_src python :tangle security/permission_security.py :mkdirp yes :comments link
 """
 Permission-based security issues and solutions.
 """
@@ -689,7 +689,7 @@ def create_secure_ipc_file(filepath: str, data: bytes):
 
 *** Input Validation and Sanitization
 
-#+begin_src python :tangle security/input_validation.py :mkdirp yes
+#+begin_src python :tangle security/input_validation.py :mkdirp yes :comments link
 """
 Input validation for filesystem IPC security.
 """
@@ -884,7 +884,7 @@ def secure_message_handler(message_file: str, base_dir: str):
 
 *** Secure Coding Patterns
 
-#+begin_src python :tangle security/secure_patterns.py :mkdirp yes
+#+begin_src python :tangle security/secure_patterns.py :mkdirp yes :comments link
 """
 Secure coding patterns for filesystem IPC.
 """
@@ -1120,7 +1120,7 @@ class PrivilegeSeparation:
 
 *** Vulnerability Scanner
 
-#+begin_src python :tangle security/vulnerability_scanner.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle security/vulnerability_scanner.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Scan for common filesystem IPC vulnerabilities.
 """

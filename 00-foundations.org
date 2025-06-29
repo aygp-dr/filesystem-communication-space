@@ -9,7 +9,7 @@
 
 A file is not just data - it's a *name* in a shared namespace that processes can agree upon as a meeting point.
 
-#+begin_src python :tangle core/concepts.py :mkdirp yes
+#+begin_src python :tangle core/concepts.py :mkdirp yes :comments link
 """
 Core concepts for understanding the filesystem as a communication space.
 
@@ -41,7 +41,7 @@ class FilesystemEntity:
 
 The filesystem namespace provides a shared reality where processes can agree on names and locations for communication.
 
-#+begin_src mermaid :file diagrams/namespace-social-contract.png :tangle diagrams/namespace-social-contract.mmd :mkdirp yes
+#+begin_src mermaid :file diagrams/namespace-social-contract.png :tangle diagrams/namespace-social-contract.mmd :mkdirp yes :comments link
 graph TD
     NS[Filesystem Namespace]
     P1[Process 1]
@@ -80,7 +80,7 @@ TODO: Develop the analogy between filesystem paths and network addresses
 
 ** The POSIX Contract
 
-#+begin_src c :tangle core/posix_guarantees.h :mkdirp yes
+#+begin_src c :tangle core/posix_guarantees.h :mkdirp yes :comments link
 /*
  * POSIX guarantees that form the foundation of filesystem IPC
  */
@@ -126,7 +126,7 @@ TODO: Compile comprehensive bibliography
 
 * Appendix: Setting Up the Environment
 
-#+begin_src bash :tangle scripts/setup_environment.sh :shebang #!/bin/bash :mkdirp yes
+#+begin_src bash :tangle scripts/setup_environment.sh :shebang #!/bin/bash :mkdirp yes :comments link
 # Setup script for exploring filesystem communication
 
 # Create standard directories for experiments

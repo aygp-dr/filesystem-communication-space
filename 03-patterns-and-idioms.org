@@ -15,7 +15,7 @@ This chapter explores recurring patterns and idioms that emerge when using the f
 
 The most fundamental pattern in filesystem IPC, leveraging the atomicity of rename operations.
 
-#+begin_src mermaid :file diagrams/atomic-rename-pattern.png :tangle diagrams/atomic-rename-pattern.mmd :mkdirp yes
+#+begin_src mermaid :file diagrams/atomic-rename-pattern.png :tangle diagrams/atomic-rename-pattern.mmd :mkdirp yes :comments link
 sequenceDiagram
     participant Writer
     participant Filesystem
@@ -29,7 +29,7 @@ sequenceDiagram
     Note over Reader: Sees complete file or nothing
 #+end_src
 
-#+begin_src python :tangle patterns/atomic_operations.py :mkdirp yes
+#+begin_src python :tangle patterns/atomic_operations.py :mkdirp yes :comments link
 """
 Atomic operations patterns for filesystem IPC.
 """
@@ -106,7 +106,7 @@ class AtomicUpdate:
 
 Implementing queues without explicit locking, using filesystem ordering guarantees.
 
-#+begin_src python :tangle patterns/lock_free_queue.py :mkdirp yes
+#+begin_src python :tangle patterns/lock_free_queue.py :mkdirp yes :comments link
 """
 Lock-free queue patterns using directory operations.
 """
@@ -206,7 +206,7 @@ class TimestampQueue:
 
 *** The Publish-Subscribe Pattern
 
-#+begin_src python :tangle patterns/pubsub.py :mkdirp yes
+#+begin_src python :tangle patterns/pubsub.py :mkdirp yes :comments link
 """
 Publish-subscribe patterns using filesystem primitives.
 """
@@ -305,7 +305,7 @@ class DurableSubscription:
 
 Using filesystem primitives for distributed coordination.
 
-#+begin_src python :tangle patterns/coordination.py :mkdirp yes
+#+begin_src python :tangle patterns/coordination.py :mkdirp yes :comments link
 """
 Coordination patterns using filesystem primitives.
 """
@@ -424,7 +424,7 @@ class ConsensusProtocol:
 
 *** The Event Bus Pattern
 
-#+begin_src python :tangle patterns/event_bus.py :mkdirp yes
+#+begin_src python :tangle patterns/event_bus.py :mkdirp yes :comments link
 """
 Event bus implementation using filesystem.
 """
@@ -518,7 +518,7 @@ class FilesystemEventBus:
 
 *** The State Machine Pattern
 
-#+begin_src python :tangle patterns/state_machine.py :mkdirp yes
+#+begin_src python :tangle patterns/state_machine.py :mkdirp yes :comments link
 """
 Distributed state machines using filesystem.
 """
@@ -618,7 +618,7 @@ class StateMachine:
 
 *** Common Mistakes
 
-#+begin_src python :tangle patterns/antipatterns.py :mkdirp yes
+#+begin_src python :tangle patterns/antipatterns.py :mkdirp yes :comments link
 """
 Examples of what NOT to do in filesystem IPC.
 """
@@ -667,7 +667,7 @@ TODO: Document common race conditions
 
 *** Batching and Buffering
 
-#+begin_src python :tangle patterns/performance.py :mkdirp yes
+#+begin_src python :tangle patterns/performance.py :mkdirp yes :comments link
 """
 Performance optimization patterns.
 """

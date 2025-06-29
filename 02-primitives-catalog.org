@@ -9,7 +9,7 @@
 
 This chapter provides a comprehensive catalog of all mechanisms that enable inter-process communication through the filesystem namespace.
 
-#+begin_src mermaid :file diagrams/ipc-taxonomy.png :tangle diagrams/ipc-taxonomy.mmd :mkdirp yes
+#+begin_src mermaid :file diagrams/ipc-taxonomy.png :tangle diagrams/ipc-taxonomy.mmd :mkdirp yes :comments link
 graph TD
     IPC[Filesystem IPC]
     
@@ -34,7 +34,7 @@ graph TD
 
 ** Classification Dimensions
 
-#+begin_src python :tangle core/primitive_taxonomy.py :mkdirp yes
+#+begin_src python :tangle core/primitive_taxonomy.py :mkdirp yes :comments link
 """
 Classification system for filesystem IPC primitives.
 """
@@ -93,7 +93,7 @@ class IPCPrimitive:
 
 The most basic form of filesystem IPC, using ordinary files for communication.
 
-#+begin_src python :tangle primitives/regular_files.py :mkdirp yes
+#+begin_src python :tangle primitives/regular_files.py :mkdirp yes :comments link
 """
 Regular files as IPC primitives.
 """
@@ -158,7 +158,7 @@ class AppendOnlyLog:
 
 Using files as distributed locks and coordination primitives.
 
-#+begin_src python :tangle primitives/lock_files.py :mkdirp yes
+#+begin_src python :tangle primitives/lock_files.py :mkdirp yes :comments link
 """
 Lock files for process coordination.
 """
@@ -225,7 +225,7 @@ class AdvisoryLock:
 
 *** Directories as Communication Primitives
 
-#+begin_src python :tangle primitives/directory_ipc.py :mkdirp yes
+#+begin_src python :tangle primitives/directory_ipc.py :mkdirp yes :comments link
 """
 Using directories for IPC patterns.
 """
@@ -306,7 +306,7 @@ class DirectoryBasedSet:
 
 *** Named Pipes (FIFOs)
 
-#+begin_src python :tangle primitives/named_pipes.py :mkdirp yes
+#+begin_src python :tangle primitives/named_pipes.py :mkdirp yes :comments link
 """
 Named pipes (FIFOs) for IPC.
 """
@@ -374,7 +374,7 @@ class MultiReaderPipe:
 
 *** Unix Domain Sockets
 
-#+begin_src python :tangle primitives/unix_sockets.py :mkdirp yes
+#+begin_src python :tangle primitives/unix_sockets.py :mkdirp yes :comments link
 """
 Unix domain sockets as filesystem IPC.
 """
@@ -446,7 +446,7 @@ class DatagramSocket:
 
 *** Shared Memory Files
 
-#+begin_src python :tangle primitives/shared_memory.py :mkdirp yes
+#+begin_src python :tangle primitives/shared_memory.py :mkdirp yes :comments link
 """
 Shared memory via filesystem.
 """
@@ -513,7 +513,7 @@ TODO: Document mandatory locking where available
 
 *** Extended Attributes
 
-#+begin_src python :tangle primitives/extended_attributes.py :mkdirp yes
+#+begin_src python :tangle primitives/extended_attributes.py :mkdirp yes :comments link
 """
 Using extended attributes for IPC.
 """
@@ -561,7 +561,7 @@ TODO: Document kernel-provided IPC via pseudo-filesystems
 
 ** Performance Characteristics
 
-#+begin_src python :tangle benchmarks/primitive_benchmarks.py :mkdirp yes
+#+begin_src python :tangle benchmarks/primitive_benchmarks.py :mkdirp yes :comments link
 """
 Benchmark different IPC primitives.
 """

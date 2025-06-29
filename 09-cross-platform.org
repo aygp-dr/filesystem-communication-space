@@ -13,7 +13,7 @@ This chapter explores how filesystem-based IPC concepts translate across differe
 
 *** Named Pipes in Windows
 
-#+begin_src python :tangle cross_platform/windows_pipes.py :mkdirp yes
+#+begin_src python :tangle cross_platform/windows_pipes.py :mkdirp yes :comments link
 """
 Windows named pipes - similar name, different implementation.
 """
@@ -173,7 +173,7 @@ class WindowsFilesystemIPC:
 
 *** Windows-Specific Patterns
 
-#+begin_src python :tangle cross_platform/windows_patterns.py :mkdirp yes
+#+begin_src python :tangle cross_platform/windows_patterns.py :mkdirp yes :comments link
 """
 IPC patterns specific to Windows environments.
 """
@@ -364,7 +364,7 @@ class CrossPlatformAbstraction:
 
 *** Everything Really Is a File
 
-#+begin_src python :tangle cross_platform/plan9_ipc.py :mkdirp yes
+#+begin_src python :tangle cross_platform/plan9_ipc.py :mkdirp yes :comments link
 """
 Plan 9's approach to IPC - everything through 9P.
 """
@@ -504,7 +504,7 @@ class Plan9Influence:
 
 *** macOS-Specific IPC
 
-#+begin_src python :tangle cross_platform/macos_ipc.py :mkdirp yes
+#+begin_src python :tangle cross_platform/macos_ipc.py :mkdirp yes :comments link
 """
 macOS filesystem IPC - BSD base with Apple additions.
 """
@@ -676,7 +676,7 @@ class MacOSFilesystemQuirks:
 
 *** Embedded and RTOS
 
-#+begin_src python :tangle cross_platform/embedded_ipc.py :mkdirp yes
+#+begin_src python :tangle cross_platform/embedded_ipc.py :mkdirp yes :comments link
 """
 IPC in embedded and real-time systems.
 """
@@ -806,7 +806,7 @@ class MobileIPC:
 
 *** Portable IPC Libraries
 
-#+begin_src python :tangle cross_platform/portable_libraries.py :mkdirp yes
+#+begin_src python :tangle cross_platform/portable_libraries.py :mkdirp yes :comments link
 """
 Libraries that abstract filesystem IPC across platforms.
 """

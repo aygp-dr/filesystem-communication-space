@@ -15,7 +15,7 @@ This chapter provides practical experiments to explore filesystem-based IPC mech
 
 A complete message bus implementation using only atomic file operations.
 
-#+begin_src python :tangle experiments/file_message_bus.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/file_message_bus.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 A message bus using only atomic file operations.
 No external dependencies, just POSIX guarantees.
@@ -224,7 +224,7 @@ if __name__ == "__main__":
 
 *** Performance Test
 
-#+begin_src python :tangle experiments/benchmark_message_bus.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/benchmark_message_bus.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Benchmark the file-based message bus.
 """
@@ -313,7 +313,7 @@ if __name__ == "__main__":
 
 *** Lock-Free Counter
 
-#+begin_src python :tangle experiments/lock_free_counter.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/lock_free_counter.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Lock-free counter using directory entries.
 """
@@ -399,7 +399,7 @@ if __name__ == "__main__":
 
 *** Lock-Free Stack
 
-#+begin_src python :tangle experiments/lock_free_stack.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/lock_free_stack.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Lock-free stack using filesystem operations.
 """
@@ -477,7 +477,7 @@ class LockFreeStack:
 
 *** Distributed Lock Manager
 
-#+begin_src python :tangle experiments/distributed_lock.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/distributed_lock.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Distributed lock manager using filesystem.
 """
@@ -613,7 +613,7 @@ if __name__ == "__main__":
 
 *** Inotify-Based Event System
 
-#+begin_src python :tangle experiments/inotify_events.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/inotify_events.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Event-driven IPC using inotify (Linux only).
 """
@@ -728,7 +728,7 @@ class InotifyEventBus:
 
 *** IPC Method Benchmark Suite
 
-#+begin_src python :tangle experiments/ipc_benchmark_suite.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/ipc_benchmark_suite.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Comprehensive benchmark of different filesystem IPC methods.
 """
@@ -930,7 +930,7 @@ if __name__ == "__main__":
 
 *** Race Condition Explorer
 
-#+begin_src python :tangle experiments/race_condition_test.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle experiments/race_condition_test.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Test for race conditions in filesystem IPC.
 """

@@ -13,7 +13,7 @@ This chapter traces the historical development of filesystem-based IPC mechanism
 
 *** The Birth of Pipes (1973)
 
-#+begin_src c :tangle history/early_pipes.c :mkdirp yes
+#+begin_src c :tangle history/early_pipes.c :mkdirp yes :comments link
 /*
  * Historical recreation of early Unix pipe concepts
  * Based on Unix V6/V7 design principles
@@ -95,7 +95,7 @@ void demonstrate_unix_philosophy() {
 
 *** Named Pipes (FIFOs) - Unix System III
 
-#+begin_src python :tangle history/fifo_evolution.py :mkdirp yes
+#+begin_src python :tangle history/fifo_evolution.py :mkdirp yes :comments link
 """
 Evolution of named pipes (FIFOs) in Unix.
 """
@@ -177,7 +177,7 @@ FIFOs were the elegant solution:
 
 *** The Alternative Path
 
-#+begin_src python :tangle history/system_v_ipc.py :mkdirp yes
+#+begin_src python :tangle history/system_v_ipc.py :mkdirp yes :comments link
 """
 System V IPC: The road less traveled by filesystem IPC.
 """
@@ -268,7 +268,7 @@ Resolution: POSIX (1988-2001) included both approaches
 
 *** Unix Domain Sockets
 
-#+begin_src python :tangle history/bsd_sockets.py :mkdirp yes
+#+begin_src python :tangle history/bsd_sockets.py :mkdirp yes :comments link
 """
 BSD's gift to filesystem IPC: Unix domain sockets.
 """
@@ -384,7 +384,7 @@ History proved BSD right - sockets became the dominant IPC mechanism.
 
 *** The Purist Approach
 
-#+begin_src python :tangle history/plan9_approach.py :mkdirp yes
+#+begin_src python :tangle history/plan9_approach.py :mkdirp yes :comments link
 """
 Plan 9: Taking "everything is a file" to its logical conclusion.
 """
@@ -473,7 +473,7 @@ But it was too late - Unix compatibility mattered more than elegance.
 
 *** Modern Optimizations
 
-#+begin_src python :tangle history/linux_evolution.py :mkdirp yes
+#+begin_src python :tangle history/linux_evolution.py :mkdirp yes :comments link
 """
 Linux's contribution to filesystem IPC evolution.
 """
@@ -602,7 +602,7 @@ Linux took a pragmatic approach:
 
 *** Container and Cloud Era
 
-#+begin_src python :tangle history/modern_trends.py :mkdirp yes
+#+begin_src python :tangle history/modern_trends.py :mkdirp yes :comments link
 """
 Modern trends in filesystem IPC (2010s-2020s).
 """
@@ -746,7 +746,7 @@ continues to drive innovation.
 
 *** What Worked and What Didn't
 
-#+begin_src python :tangle history/lessons_learned.py :mkdirp yes
+#+begin_src python :tangle history/lessons_learned.py :mkdirp yes :comments link
 """
 Lessons from 50 years of filesystem IPC evolution.
 """

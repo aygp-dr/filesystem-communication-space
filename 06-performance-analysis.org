@@ -13,7 +13,7 @@ This chapter provides comprehensive performance analysis of filesystem-based IPC
 
 *** Test Environment
 
-#+begin_src python :tangle benchmarks/test_environment.py :mkdirp yes
+#+begin_src python :tangle benchmarks/test_environment.py :mkdirp yes :comments link
 """
 Document and verify test environment for benchmarks.
 """
@@ -97,7 +97,7 @@ class TestEnvironment:
 
 *** Benchmark Framework
 
-#+begin_src python :tangle benchmarks/benchmark_framework.py :mkdirp yes
+#+begin_src python :tangle benchmarks/benchmark_framework.py :mkdirp yes :comments link
 """
 Framework for consistent benchmarking of IPC methods.
 """
@@ -236,7 +236,7 @@ class Benchmark:
 
 *** File Operations
 
-#+begin_src python :tangle benchmarks/file_operations.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle benchmarks/file_operations.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Benchmark basic file operations used in IPC.
 """
@@ -357,7 +357,7 @@ if __name__ == "__main__":
 
 *** IPC Primitive Comparison
 
-#+begin_src python :tangle benchmarks/ipc_comparison.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle benchmarks/ipc_comparison.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Compare performance of different IPC primitives.
 """
@@ -503,7 +503,7 @@ if __name__ == "__main__":
 
 *** Concurrent Access Patterns
 
-#+begin_src python :tangle benchmarks/scalability_test.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle benchmarks/scalability_test.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Test scalability with multiple processes.
 """
@@ -669,7 +669,7 @@ if __name__ == "__main__":
 
 *** Different Filesystem Comparison
 
-#+begin_src python :tangle benchmarks/filesystem_comparison.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle benchmarks/filesystem_comparison.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Compare IPC performance across different filesystems.
 """
@@ -767,7 +767,7 @@ if __name__ == "__main__":
 
 *** CPU and I/O Profiling
 
-#+begin_src python :tangle benchmarks/profile_ipc.py :mkdirp yes :shebang #!/usr/bin/env python3
+#+begin_src python :tangle benchmarks/profile_ipc.py :mkdirp yes :comments link :shebang #!/usr/bin/env python3
 """
 Profile CPU and I/O usage of IPC operations.
 """
@@ -864,7 +864,7 @@ if __name__ == "__main__":
 
 *** Optimization Strategies
 
-#+begin_src python :tangle benchmarks/optimization_demo.py :mkdirp yes
+#+begin_src python :tangle benchmarks/optimization_demo.py :mkdirp yes :comments link
 """
 Demonstrate optimization techniques for filesystem IPC.
 """

@@ -9,7 +9,7 @@
 
 The filesystem namespace serves as a distributed agreement mechanism where independent processes can discover each other and establish communication channels.
 
-#+begin_src python :tangle core/rendezvous.py :mkdirp yes
+#+begin_src python :tangle core/rendezvous.py :mkdirp yes :comments link
 """
 Rendezvous patterns in filesystem-based communication.
 
@@ -50,7 +50,7 @@ class RendezvousPoint(ABC):
 
 *** System Standard Paths
 
-#+begin_src python :tangle core/well_known_paths.py :mkdirp yes
+#+begin_src python :tangle core/well_known_paths.py :mkdirp yes :comments link
 """
 Standard filesystem locations used for process rendezvous.
 """
@@ -108,7 +108,7 @@ TODO: Document common application rendezvous patterns
 
 Processes agree on fixed paths beforehand.
 
-#+begin_src python :tangle patterns/static_discovery.py :mkdirp yes
+#+begin_src python :tangle patterns/static_discovery.py :mkdirp yes :comments link
 """
 Static discovery: Using predetermined paths for rendezvous.
 """
@@ -149,7 +149,7 @@ class StaticRendezvous:
 
 Processes discover each other through filesystem scanning or events.
 
-#+begin_src mermaid :file diagrams/dynamic-discovery-flow.png :tangle diagrams/dynamic-discovery-flow.mmd :mkdirp yes
+#+begin_src mermaid :file diagrams/dynamic-discovery-flow.png :tangle diagrams/dynamic-discovery-flow.mmd :mkdirp yes :comments link
 sequenceDiagram
     participant Service
     participant Filesystem
@@ -173,7 +173,7 @@ TODO: Implement dynamic discovery patterns
 
 *** Lock-Based Coordination
 
-#+begin_src python :tangle patterns/lock_coordination.py :mkdirp yes
+#+begin_src python :tangle patterns/lock_coordination.py :mkdirp yes :comments link
 """
 Using filesystem locks for process coordination at rendezvous.
 """
@@ -218,7 +218,7 @@ TODO: Implement leader election using filesystem primitives
 
 *** Permission-Based Access Control
 
-#+begin_src python :tangle security/permission_rendezvous.py :mkdirp yes
+#+begin_src python :tangle security/permission_rendezvous.py :mkdirp yes :comments link
 """
 Security considerations for filesystem rendezvous points.
 """
@@ -277,7 +277,7 @@ TODO: Examine Docker daemon socket rendezvous
 
 ** Performance Implications
 
-#+begin_src python :tangle benchmarks/rendezvous_performance.py :mkdirp yes
+#+begin_src python :tangle benchmarks/rendezvous_performance.py :mkdirp yes :comments link
 """
 Benchmark different rendezvous mechanisms.
 """
