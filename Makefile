@@ -1,7 +1,7 @@
 # Makefile for Filesystem Communication Space
 # Handles tangling org files, running experiments, and generating diagrams
 
-.PHONY: all tangle experiments benchmark diagrams clean help pdf readme
+.PHONY: all tangle experiments benchmark diagrams clean help pdf readme fifo-demo
 
 # Default target
 all: README.md tangle diagrams
@@ -12,6 +12,7 @@ help:
 	@echo "  all         - Generate README.md, tangle code and generate diagrams (default)"
 	@echo "  tangle      - Extract source code from org files"
 	@echo "  experiments - Run all experiments"
+	@echo "  fifo-demo   - Run FIFO communication demo with Node.js"
 	@echo "  benchmark   - Run performance benchmarks"
 	@echo "  diagrams    - Generate Mermaid diagrams"
 	@echo "  pdf         - Generate PDF documentation"
@@ -73,6 +74,14 @@ experiments: tangle
 		done; \
 	fi
 	@echo "Experiments complete!"
+
+# Run FIFO instrumentation experiments
+fifo-demo:
+	@echo "Running FIFO communication demo..."
+	@if [ -f "instrumented/demo-summary.sh" ]; then \
+		bash instrumented/demo-summary.sh; \
+	fi
+	@echo "FIFO demo complete!"
 
 # Run benchmarks
 benchmark: tangle

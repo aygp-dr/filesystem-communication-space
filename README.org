@@ -29,6 +29,7 @@ The filesystem is more than storage - it's a shared namespace where processes re
 | [[file:07-security-implications.org][07-security-implications.org]]  | Trust, permissions, and race conditions              |
 | [[file:08-historical-evolution.org][08-historical-evolution.org]]   | From Unix pipes to modern IPC                        |
 | [[file:09-cross-platform.org][09-cross-platform.org]]         | Beyond Unix: Windows, Plan 9, and others             |
+| [[file:instrumented/][instrumented/]]                 | FIFO experiments with Node.js IPC and tracing        |
 
 * Key Concepts Explored
 
