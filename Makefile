@@ -1,24 +1,40 @@
 # Makefile for Filesystem Communication Space
 # Handles tangling org files, running experiments, and generating diagrams
 
-.PHONY: all tangle experiments benchmark diagrams clean help pdf readme fifo-demo
+.PHONY: all tangle experiments benchmark diagrams clean help pdf readme fifo-demo check-deps
+
+# Color definitions
+CYAN := \033[36m
+GREEN := \033[32m
+YELLOW := \033[33m
+RESET := \033[0m
 
 # Default target
 all: README.md tangle diagrams
 
 # Help target
 help:
-	@echo "Available targets:"
-	@echo "  all         - Generate README.md, tangle code and generate diagrams (default)"
-	@echo "  tangle      - Extract source code from org files"
-	@echo "  experiments - Run all experiments"
-	@echo "  fifo-demo   - Run FIFO communication demo with Node.js"
-	@echo "  benchmark   - Run performance benchmarks"
-	@echo "  diagrams    - Generate Mermaid diagrams"
-	@echo "  pdf         - Generate PDF documentation"
-	@echo "  readme      - Generate README.md from README.org"
-	@echo "  clean       - Remove generated files"
-	@echo "  help        - Show this help message"
+	@echo "$(GREEN)Filesystem Communication Space - Makefile$(RESET)"
+	@echo "$(YELLOW)Usage:$(RESET) make [target]"
+	@echo ""
+	@echo "$(YELLOW)Main targets:$(RESET)"
+	@echo "  $(CYAN)all$(RESET)         - Generate README.md, tangle code and generate diagrams (default)"
+	@echo "  $(CYAN)tangle$(RESET)      - Extract source code from org files"
+	@echo "  $(CYAN)clean$(RESET)       - Remove generated files"
+	@echo ""
+	@echo "$(YELLOW)Experiment targets:$(RESET)"
+	@echo "  $(CYAN)experiments$(RESET) - Run all experiments"
+	@echo "  $(CYAN)fifo-demo$(RESET)   - Run FIFO communication demo with Node.js"
+	@echo "  $(CYAN)benchmark$(RESET)   - Run performance benchmarks"
+	@echo ""
+	@echo "$(YELLOW)Documentation targets:$(RESET)"
+	@echo "  $(CYAN)diagrams$(RESET)    - Generate Mermaid diagrams"
+	@echo "  $(CYAN)pdf$(RESET)         - Generate PDF documentation"
+	@echo "  $(CYAN)readme$(RESET)      - Generate README.md from README.org"
+	@echo ""
+	@echo "$(YELLOW)Utility targets:$(RESET)"
+	@echo "  $(CYAN)check-deps$(RESET)  - Check if all dependencies are installed"
+	@echo "  $(CYAN)help$(RESET)        - Show this help message"
 
 # Convenience target for README
 readme: README.md
@@ -146,3 +162,13 @@ PYTHON ?= python3
 # Create directory structure
 setup-dirs:
 	@mkdir -p experiments patterns analysis security core diagrams
+
+# Check dependencies
+check-deps:
+	@echo "$(YELLOW)Checking dependencies...$(RESET)"
+	@command -v emacs >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) Emacs" || echo "$(CYAN)✗$(RESET) Emacs (required for tangling)"
+	@command -v python3 >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) Python 3" || echo "$(CYAN)✗$(RESET) Python 3 (required for experiments)"
+	@command -v node >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) Node.js" || echo "$(CYAN)✗$(RESET) Node.js (required for fifo-demo)"
+	@command -v jq >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) jq" || echo "$(YELLOW)⚠$(RESET) jq (optional, for JSON formatting)"
+	@command -v shellcheck >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) shellcheck" || echo "$(YELLOW)⚠$(RESET) shellcheck (optional, for script linting)"
+	@command -v shfmt >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) shfmt" || echo "$(YELLOW)⚠$(RESET) shfmt (optional, for script formatting)"
