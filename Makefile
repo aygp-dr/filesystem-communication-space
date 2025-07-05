@@ -1,7 +1,7 @@
 # Makefile for Filesystem Communication Space
 # Handles tangling org files, running experiments, and generating diagrams
 
-.PHONY: all tangle experiments benchmark diagrams clean help pdf readme fifo-demo check-deps
+.PHONY: all tangle experiments benchmark diagrams clean help pdf readme fifo-demo check-deps trace-claude
 
 # Color definitions
 CYAN := \033[36m
@@ -34,6 +34,7 @@ help:
 	@echo ""
 	@echo "$(YELLOW)Utility targets:$(RESET)"
 	@echo "  $(CYAN)check-deps$(RESET)  - Check if all dependencies are installed"
+	@echo "  $(CYAN)trace-claude$(RESET) - Show commands to trace Claude instances (FreeBSD)"
 	@echo "  $(CYAN)help$(RESET)        - Show this help message"
 
 # Convenience target for README
@@ -172,3 +173,30 @@ check-deps:
 	@command -v jq >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) jq" || echo "$(YELLOW)⚠$(RESET) jq (optional, for JSON formatting)"
 	@command -v shellcheck >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) shellcheck" || echo "$(YELLOW)⚠$(RESET) shellcheck (optional, for script linting)"
 	@command -v shfmt >/dev/null 2>&1 && echo "$(GREEN)✓$(RESET) shfmt" || echo "$(YELLOW)⚠$(RESET) shfmt (optional, for script formatting)"
+
+# Trace Claude instances (requires sudo)
+trace-claude:
+	@echo "$(YELLOW)Claude Process Monitoring - FreeBSD$(RESET)"
+	@echo ""
+	@echo "$(CYAN)Current Claude instances:$(RESET)"
+	@ps -o pid,pcpu,pmem,etime,args | grep "node: claude" | grep -v grep || echo "No Claude instances found"
+	@echo ""
+	@echo "$(YELLOW)To trace system calls, YOU need to run one of these commands:$(RESET)"
+	@echo ""
+	@echo "$(GREEN)1. Quick 10-second trace to log file:$(RESET)"
+	@echo "   sudo dtrace -n 'syscall:::entry /execname == \"node\"/ { @[probefunc] = count(); }' -c 'sleep 10' > instrumented/logs/dtrace-syscalls.log"
+	@echo ""
+	@echo "$(GREEN)2. Trace file operations for specific PID:$(RESET)"
+	@echo "   sudo dtrace -n 'syscall::open:entry /pid == \$$target/ { printf(\"%s\\n\", copyinstr(arg0)); }' -p <PID> > instrumented/logs/dtrace-files.log"
+	@echo ""
+	@echo "$(GREEN)3. Monitor all Claude file operations to FIFO:$(RESET)"
+	@echo "   sudo dtrace -n 'syscall::open:entry /execname == \"node\"/ { printf(\"%s %s\\n\", execname, copyinstr(arg0)); }' > ~/.claude/fifos/syscalls.fifo"
+	@echo ""
+	@echo "$(GREEN)4. Use the comprehensive monitor script:$(RESET)"
+	@echo "   sudo dtrace -s instrumented/claude-monitor.d -p <PID>"
+	@echo ""
+	@echo "$(CYAN)Non-sudo alternatives:$(RESET)"
+	@echo "   truss -p <PID>                    # Trace system calls"
+	@echo "   procstat -f <PID>                 # Show file descriptors"
+	@echo "   bash instrumented/claude-status.sh # Show Claude status"
+	@mkdir -p instrumented/logs
